@@ -67,6 +67,11 @@ We generate a simple synthetic dataset, fit a naïve OLS in Python, and watch a 
 
 ---
 
+```{r}
+#| include: false
+reticulate::use_virtualenv(".venv", required = TRUE)
+```
+
 # Part 1 — Simpson's Paradox
 
 ## The setup
