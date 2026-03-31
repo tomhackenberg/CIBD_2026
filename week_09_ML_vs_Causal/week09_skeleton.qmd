@@ -1,0 +1,218 @@
+# Week 9: ML for Causal Inference — Why and How?
+
+---
+
+## Part A: Machine Learning Basics
+*Framing note for students: This section is foundational — make sure you're comfortable with it. It's fair game for the exam and gives you the toolkit for everything that follows. If you know this already, use the time to consolidate.*
+
+---
+
+### 1. Recap: Causal Inference Fundamentals
+
+- Correlation vs. causation — the core distinction
+  - Sleeping with shoes on and waking up with a headache
+  - Moving together ≠ one causes the other
+- Potential outcomes framework (brief recap from Part 1)
+  - $Y_i(1)$, $Y_i(0)$: what would have happened under each treatment
+  - The fundamental problem of causal inference: we only observe one
+- Average Treatment Effect (ATE)
+  $$ATE = \mathbb{E}[Y(1) - Y(0)]$$
+- Conditional Average Treatment Effect (CATE)
+  $$CATE(x) = \mathbb{E}[Y(1) - Y(0) \mid X = x]$$
+- Directed Acyclic Graphs (DAGs)
+  - Nodes = variables, edges = causal direction, no cycles
+  - Purpose: make causal assumptions explicit and visible
+  - Confounders, mediators, colliders — visual identification
+
+---
+
+### 2. Types of Machine Learning
+
+- **Supervised learning**: labelled data, learn input → output mapping
+  - Regression: predict numeric outcome (e.g. sales revenue)
+  - Classification: predict class label (e.g. churn / no churn)
+- **Unsupervised learning**: no labels, find structure
+  - Clustering (K-Means), dimensionality reduction (PCA)
+- **Semi-supervised learning**: few labels, many unlabelled
+- **Reinforcement learning**: reward/penalty feedback loop
+- *Key point*: most of what we do in causal ML is supervised — but with a twist
+
+---
+
+### 3. Practical Challenges of Machine Learning
+
+- Data quality: insufficient quantity, non-representative samples, noise
+- Feature engineering: picking the right variables matters
+- **Underfitting vs. Overfitting**
+  - Underfitting: model too simple, high bias
+  - Overfitting: model too complex, memorises training noise
+  - The bias-variance tradeoff
+- **Regularisation**: penalise complexity to prevent overfitting
+  - Ridge ($L_2$): shrinks coefficients
+  - LASSO ($L_1$): shrinks and zeros out coefficients
+  - Hyperparameter $\lambda$ controls the amount of regularisation
+- **Validation strategy**
+  - Train/test split: generalisation error = out-of-sample error
+  - Cross-validation: $k$-fold, rotating held-out folds
+
+---
+
+### 4. Overview of ML Models
+
+| Model Type | Interpretability | Flexibility | Notes |
+|---|---|---|---|
+| Linear (OLS, Ridge, LASSO) | High | Low | Baseline; assumes linearity |
+| Tree-based (RF, XGBoost) | Medium | High | Handles non-linearities; feature importance |
+| Neural Networks (MLP) | Low | Very High | Powerful; expensive; needs tuning |
+
+---
+
+### 5. Data Preprocessing Pipelines
+
+- Why preprocess? Garbage in, garbage out — for both prediction *and* causal estimation
+- Key steps:
+  - **Cleaning**: handle missing values (imputation strategies)
+  - **Scaling**: standardise numeric features (mean 0, std 1)
+  - **Encoding**: one-hot encode categorical variables
+- Sklearn `Pipeline` + `ColumnTransformer`: chain steps cleanly
+- *Why pipelines matter for causal ML*: prevents data leakage between train/test folds; essential for cross-fitting later
+
+```python
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+
+num_transformer = Pipeline([
+    ('impute', SimpleImputer(strategy='mean')),
+    ('scale', StandardScaler())
+])
+cat_transformer = Pipeline([
+    ('impute', SimpleImputer(strategy='most_frequent')),
+    ('encode', OneHotEncoder(handle_unknown='ignore'))
+])
+preprocessor = ColumnTransformer([
+    ('num', num_transformer, num_cols),
+    ('cat', cat_transformer, cat_cols)
+])
+```
+
+---
+
+### 6. Dimensionality Reduction: PCA
+
+- Projects data onto orthogonal axes of maximum variance
+- Reduces noise, addresses multicollinearity, speeds up computation
+- `explained_variance_ratio_`: how much variance each component captures
+- Limitation: components are linear combinations — interpretability is lost
+
+```python
+from sklearn.decomposition import PCA
+pca = PCA(n_components=2)
+X_reduced = pca.fit_transform(X)
+print(pca.explained_variance_ratio_)
+```
+
+---
+
+### 7. Clustering: K-Means
+
+- Unsupervised: partition $n$ observations into $K$ clusters
+- Minimises within-cluster variance (inertia)
+- Choosing $K$: elbow method, silhouette score
+- Marketing application: customer segmentation
+
+```python
+from sklearn.cluster import KMeans
+kmeans = KMeans(n_clusters=3, random_state=42)
+clusters = kmeans.fit_predict(X)
+```
+
+---
+
+### 8. Evaluation Metrics
+
+**Regression**
+- RMSE: penalises large errors more
+- MAE: average absolute error, robust to outliers
+- $R^2$: proportion of variance explained
+
+**Classification**
+$$\text{Precision} = \frac{TP}{TP+FP} \qquad \text{Recall} = \frac{TP}{TP+FN}$$
+$$F_1 = \frac{2 \times \text{Precision} \times \text{Recall}}{\text{Precision} + \text{Recall}}$$
+$$\text{Accuracy} = \frac{TP+TN}{TP+FP+TN+FN}$$
+
+- *Which metric to use?* Depends on the cost of false positives vs. false negatives
+
+---
+
+## Part B: Why ML Alone Isn't Enough for Causal Questions
+*Framing note for students: This is where the course pivots. What follows is the core intellectual contribution of this half — and where the exam gets harder.*
+
+---
+
+### 9. The Prediction vs. Causation Gap
+
+- ML is optimised to minimise prediction error — not to recover causal effects
+- A perfectly predictive model can be completely wrong about causation
+- Example: an algorithm predicts high sales in regions with high ad spend
+  - But both may be driven by product quality — a confounder
+  - Intervening on ad spend will not produce the predicted sales lift
+- Formal distinction:
+  - **Prediction**: $\hat{Y} = f(X)$ — minimise $\mathbb{E}[(Y - \hat{Y})^2]$
+  - **Causal effect**: $\mathbb{E}[Y(t_1) - Y(t_0)]$ — requires counterfactual reasoning
+- *You cannot get from one to the other without additional structure*
+
+---
+
+### 10. Why Regularisation Breaks Causal Inference
+
+- LASSO minimises prediction error + $\lambda \|\beta\|_1$
+- It shrinks *all* coefficients — including the causal one
+- If the treatment variable $T$ is correlated with controls $X$, LASSO may shrink $\hat{\beta}_T$ toward zero even if the true effect is large
+- Post-selection inference problem: choosing variables based on LASSO, then running OLS on the selected set, invalidates standard errors
+- *The regularisation that helps prediction actively harms causal estimation*
+
+---
+
+### 11. The Omitted Variable / Confounding Problem at Scale
+
+- In low dimensions: add controls to OLS, get unbiased estimate
+- In high dimensions ($p$ large, possibly $p > n$): OLS breaks down
+  - Cannot invert $X'X$, multicollinearity explodes, overfitting
+- Naively adding ML to "control for everything" doesn't solve this
+  - ML residuals are biased by regularisation
+  - Standard errors are invalid post-selection
+- *We need a principled way to use ML for nuisance estimation while preserving valid inference on the causal parameter — that's what DML does*
+
+---
+
+### 12. Roadmap: Where We're Going
+
+| Week | Topic | Key Question |
+|---|---|---|
+| 9 (today) | ML basics + prediction vs. causation | Why can't I just use ML? |
+| 11 | Frisch-Waugh-Lovell Theorem | What does "controlling for" really mean? |
+| 12 | Double Machine Learning | How do I use ML to get valid causal estimates? |
+| 15 | CATE & Marketing Optimisation | Who benefits from treatment, and by how much? |
+
+- The thread: **FWL is the engine → DML operationalises it → CATE personalises it**
+- Everything builds on today's foundations
+
+---
+
+### 13. Introducing the Toolkit
+
+- **`econml`** (Microsoft): primary library for causal ML in Python
+- **`doubleml`**: dedicated DML implementation with inference
+- **`grf`** (R): generalised random forests for causal effects
+- *Note on language*: Quarto runs Python and R in the same document — the method matters, not the language. Pick the right tool for the job.
+
+---
+
+## Teaching Notes
+
+- Part A can be covered quickly if students have ML background — use it to consolidate vocabulary
+- The "why regularisation breaks causation" section (§10) is the conceptual pivot — spend time here
+- The roadmap slide (§12) is worth returning to at the start of each subsequent week
+- Coding notebook for this week: fit LASSO on e-commerce data, show coefficient instability, introduce Quarto bilingual workflow

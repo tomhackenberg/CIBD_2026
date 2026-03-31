@@ -1,0 +1,374 @@
+---
+title: "Week 9 — Optional Notebook"
+subtitle: "Intuition Before the Maths"
+author: "ADS & Marketing · Block 2"
+date: "30 March 2025"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 2
+    toc-title: "Contents"
+    code-fold: false
+    code-tools: true
+    highlight-style: github
+    fig-align: center
+    embed-resources: true
+execute:
+  eval: true
+  echo: true
+  warning: false
+  message: false
+---
+
+> **This notebook is optional.** Nothing here is required for the exam. It exists for students who want to build intuition early — and to demonstrate that Quarto runs R and Python side by side without friction. Most cells take under a second to run.
+
+---
+
+## Environment setup — start here
+
+If you have not already set up the course environment, follow the instructions in the repo `README.md` before running this notebook. The short version:
+
+**First time (start of block):**
+
+```bash
+# Install uv — Mac/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Then in the repo root
+uv sync
+```
+
+**Every time you open a notebook:**
+
+```bash
+quarto preview week09/week09_notebook.qmd
+```
+
+That is it. `uv sync` created a `.venv/` folder in the repo root, and `_quarto.yml` tells Quarto to use it automatically — no activation step needed.
+
+::: {.callout-note}
+**R packages** — if the DAG chunk (the R cell below) throws an error, open R and run `renv::restore(prompt = FALSE)` from the repo root. This only needs to be done once.
+:::
+
+---
+
+## What this notebook covers
+
+**Part 1 — Simpson's Paradox** *(~20 min)*
+A reminder that aggregated data lies. We build the paradox from scratch, visualise it, and end on the question that Week 11 will answer.
+
+**Part 2 — The Naïve OLS Problem** *(~25 min)*
+We generate a simple synthetic dataset, fit a naïve OLS in Python, and watch a coefficient we should not trust look very convincing. This is the number Week 12 will explain.
+
+::: {.callout-note}
+**On language.** This course is method-agnostic. Quarto handles R and Python in the same document — each chunk is labelled `{r}` or `{python}`. You do not need both installed; use whichever you prefer and read the other. The exam will not test syntax.
+:::
+
+---
+
+# Part 1 — Simpson's Paradox
+
+## The setup
+
+Suppose a firm runs two ad campaigns — one targeting **budget** customers, one targeting **premium** customers — and measures conversion rates.
+
+Aggregated across both groups, Campaign B looks better. Broken down by segment, Campaign A wins in *both* groups.
+
+This is Simpson's Paradox: a trend that appears in aggregated data reverses — or disappears — when the data is disaggregated. It is not a data error. It is a structural feature of how the groups are mixed.
+
+Let's build it.
+
+```{python}
+#| label: setup-python
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+
+rng = np.random.default_rng(42)
+```
+
+```{python}
+#| label: simpson-data
+# --- Budget segment ---
+# Small group, low baseline conversion, Campaign A assigned
+n_budget = 200
+budget = pd.DataFrame({
+    "segment":    "Budget",
+    "campaign":   "A",
+    "conversion": rng.binomial(1, 0.18, n_budget)   # 18% base rate
+})
+
+# --- Premium segment ---
+# Large group, high baseline conversion, Campaign B assigned
+n_premium = 800
+premium = pd.DataFrame({
+    "segment":    "Premium",
+    "campaign":   "B",
+    "conversion": rng.binomial(1, 0.62, n_premium)  # 62% base rate
+})
+
+# Add campaign lift: A is genuinely 8pp better in both segments
+budget.loc[budget.campaign == "A",    "conversion"] = (
+    rng.binomial(1, 0.26, n_budget))   # 18 + 8
+premium.loc[premium.campaign == "B",  "conversion"] = (
+    rng.binomial(1, 0.62, n_premium))  # no lift — B is the control here
+
+# Combine
+df = pd.concat([budget, premium], ignore_index=True)
+```
+
+```{python}
+#| label: simpson-rates
+# Aggregate conversion rates
+agg = df.groupby("campaign")["conversion"].mean().rename("rate").reset_index()
+seg = df.groupby(["segment", "campaign"])["conversion"].mean().rename("rate").reset_index()
+
+print("=== Aggregated (misleading) ===")
+print(agg.to_string(index=False))
+print()
+print("=== By segment (truthful) ===")
+print(seg.to_string(index=False))
+```
+
+The aggregated view says B wins. The segmented view says A wins in both groups. The difference is entirely driven by the **mix**: Campaign B was disproportionately assigned to the high-converting Premium segment, so its raw rate looks better.
+
+```{python}
+#| label: simpson-plot
+#| fig-cap: "Simpson's Paradox — aggregated vs. segmented conversion rates"
+
+fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), facecolor="#0f1117")
+
+palette = {"A": "#7ecba1", "B": "#e07070"}
+
+for ax in axes:
+    ax.set_facecolor("#1e2d3d")
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#3a5068")
+    ax.tick_params(colors="#a0b4c8")
+    ax.yaxis.label.set_color("#a0b4c8")
+    ax.xaxis.label.set_color("#a0b4c8")
+    ax.title.set_color("#d0dce8")
+
+# Left: aggregated
+ax = axes[0]
+bars = ax.bar(agg["campaign"], agg["rate"],
+              color=[palette[c] for c in agg["campaign"]], width=0.5)
+ax.set_title("Aggregated\n(what you see without segmenting)", fontsize=11)
+ax.set_ylabel("Conversion rate")
+ax.set_ylim(0, 0.8)
+ax.set_xlabel("Campaign")
+for bar, val in zip(bars, agg["rate"]):
+    ax.text(bar.get_x() + bar.get_width() / 2, val + 0.02,
+            f"{val:.1%}", ha="center", color="#d0dce8", fontsize=11)
+
+# Right: segmented
+ax = axes[1]
+x = np.arange(2)
+segs  = ["Budget", "Premium"]
+width = 0.35
+for i, camp in enumerate(["A", "B"]):
+    vals = [seg.loc[(seg.segment == s) & (seg.campaign == camp), "rate"].values
+            for s in segs]
+    vals = [v[0] if len(v) else 0 for v in vals]
+    bars = ax.bar(x + i * width, vals, width, label=f"Campaign {camp}",
+                  color=palette[camp])
+    for bar, val in zip(bars, vals):
+        if val > 0:
+            ax.text(bar.get_x() + bar.get_width() / 2, val + 0.02,
+                    f"{val:.1%}", ha="center", color="#d0dce8", fontsize=10)
+
+ax.set_title("By segment\n(the truth)", fontsize=11)
+ax.set_xticks(x + width / 2)
+ax.set_xticklabels(segs)
+ax.set_ylabel("Conversion rate")
+ax.set_ylim(0, 0.8)
+ax.legend(facecolor="#1e2d3d", labelcolor="#d0dce8", edgecolor="#3a5068")
+
+plt.tight_layout()
+plt.savefig("simpson_plot.png", dpi=130, bbox_inches="tight",
+            facecolor=fig.get_facecolor())
+plt.show()
+```
+
+## What's actually going on — the DAG
+
+The paradox has a clean causal explanation. Customer segment drives *both* which campaign a customer was assigned to (confounding the comparison) *and* their baseline conversion rate. Segment is a confounder.
+
+We can draw this precisely. Let's switch to R.
+
+```{r}
+#| label: dag-r
+#| fig-cap: "DAG — customer segment confounds the campaign–conversion relationship"
+
+library(dagitty)
+library(ggdag)
+library(ggplot2)
+
+dag <- dagitty('dag {
+  Segment  [pos="0,1"]
+  Campaign [pos="-1,0"]
+  Conversion [pos="1,0"]
+
+  Segment  -> Campaign
+  Segment  -> Conversion
+  Campaign -> Conversion
+}')
+
+ggdag(dag, layout = "auto", text_size = 3.8) +
+  theme_dag_blank() +
+  theme(
+    plot.background  = element_rect(fill = "#0f1117", colour = NA),
+    panel.background = element_rect(fill = "#1e2d3d", colour = NA)
+  ) +
+  geom_dag_edges(edge_colour = "#5a8aaa", edge_width = 0.8) +
+  geom_dag_node(colour = "#3a5068", fill = "#1e2d3d", size = 16) +
+  geom_dag_text(colour = "#d0dce8", size = 3.8) +
+  labs(title   = "Segment confounds Campaign → Conversion",
+       caption = "Arrow from Segment to Campaign = confounder")
+```
+
+The backdoor path is `Campaign ← Segment → Conversion`. As long as that path is open — i.e. as long as we do not condition on Segment — the raw comparison between campaigns is contaminated.
+
+Conditioning on Segment closes the backdoor. The segmented rates we computed above are the unconfounded estimates.
+
+## The question this raises
+
+We fixed the paradox by conditioning on one obvious confounder. But:
+
+- What if we had dozens of confounders, some correlated with each other?
+- What if conditioning on segment isn't enough — because segment has a non-linear effect?
+- What if we had so many control variables that OLS became unreliable?
+
+These are exactly the questions Week 11 and 12 address. For now, the takeaway is simple:
+
+::: {.callout-important}
+**Aggregated rates lie when groups differ systematically.** The fix is to condition on the confounder — but "conditioning on" needs to be done carefully. That is what the rest of Block 2 is about.
+:::
+
+---
+
+# Part 2 — The Naïve OLS Problem
+
+## The synthetic dataset
+
+We generate data from a known data-generating process — so we know the *true* causal effect. We then fit naïve OLS and observe how far off it is.
+
+**The DGP:**
+
+- $W$ = product quality (the confounder)
+- $T$ = ad spend, driven partly by quality: firms with better products advertise more
+- $Y$ = sales, driven by quality directly *and* by ad spend causally
+- True causal effect of ad spend on sales: **τ = 1.5** (£1 of ad spend → £1.50 of sales)
+
+```{python}
+#| label: dgp
+rng = np.random.default_rng(99)
+n   = 500
+
+# Confounder: product quality, standardised
+W = rng.normal(0, 1, n)
+
+# Treatment: ad spend — quality firms spend more
+T = 2.0 * W + rng.normal(0, 1, n)
+
+# Outcome: sales
+# True effect of T on Y = 1.5
+# Quality also drives sales directly (gamma = 3.0)
+tau_true = 1.5
+Y = tau_true * T + 3.0 * W + rng.normal(0, 1, n)
+
+data = pd.DataFrame({"W": W, "T": T, "Y": Y})
+print(data.describe().round(2))
+```
+
+## Naïve OLS — ignoring the confounder
+
+A researcher who doesn't know about $W$ (or ignores it) runs the simple regression $Y \sim T$.
+
+```{python}
+#| label: naive-ols
+X_naive = sm.add_constant(data["T"])
+model_naive = sm.OLS(data["Y"], X_naive).fit()
+print(model_naive.summary().tables[1])
+```
+
+```{python}
+#| label: naive-result
+tau_naive = model_naive.params["T"]
+print(f"True τ:       {tau_true:.2f}")
+print(f"Naïve OLS τ̂: {tau_naive:.2f}  ({'overestimate' if tau_naive > tau_true else 'underestimate'})")
+print(f"Bias:          {tau_naive - tau_true:+.2f}")
+```
+
+The naïve estimate is substantially above the true effect. The t-statistic is large, the p-value is tiny, the confidence interval is tight — and the estimate is *wrong*. Nothing in the regression output flags the problem.
+
+## OLS with the confounder — the correct baseline
+
+If we observe $W$ and include it, OLS recovers the true effect.
+
+```{python}
+#| label: controlled-ols
+X_ctrl = sm.add_constant(data[["T", "W"]])
+model_ctrl = sm.OLS(data["Y"], X_ctrl).fit()
+
+tau_ctrl = model_ctrl.params["T"]
+print(f"True τ:            {tau_true:.2f}")
+print(f"Naïve OLS τ̂:      {tau_naive:.2f}")
+print(f"Controlled OLS τ̂: {tau_ctrl:.2f}")
+```
+
+```{python}
+#| label: comparison-plot
+#| fig-cap: "Naïve vs. controlled OLS — both look precise; only one is right"
+
+fig, ax = plt.subplots(figsize=(7, 4.5), facecolor="#0f1117")
+ax.set_facecolor("#1e2d3d")
+for spine in ax.spines.values():
+    spine.set_edgecolor("#3a5068")
+ax.tick_params(colors="#a0b4c8")
+ax.yaxis.label.set_color("#a0b4c8")
+ax.title.set_color("#d0dce8")
+
+labels = ["True τ", "Naïve OLS\n(ignores W)", "OLS + control\n(includes W)"]
+values = [tau_true, tau_naive, tau_ctrl]
+colors = ["#a0b4c8", "#e07070", "#7ecba1"]
+
+bars = ax.barh(labels, values, color=colors, height=0.5)
+ax.axvline(tau_true, color="#a0b4c8", linestyle="--", linewidth=1.2, alpha=0.6)
+
+for bar, val in zip(bars, values):
+    ax.text(val + 0.05, bar.get_y() + bar.get_height() / 2,
+            f"{val:.2f}", va="center", color="#d0dce8", fontsize=11)
+
+ax.set_xlabel("Estimated effect of ad spend on sales")
+ax.set_title("Same data. Very different conclusions.", fontsize=12)
+ax.set_xlim(0, max(values) * 1.25)
+
+plt.tight_layout()
+plt.savefig("ols_comparison.png", dpi=130, bbox_inches="tight",
+            facecolor=fig.get_facecolor())
+plt.show()
+```
+
+## The uncomfortable punchline
+
+In this synthetic example we *knew* $W$ existed and included it. In real marketing data:
+
+- You rarely observe product quality directly
+- There may be dozens of confounders, correlated with each other
+- Some effects may be non-linear — so including $W$ in OLS isn't enough even if you observe it
+
+The naïve OLS number ($\hat{\tau} \approx$ `{python} round(tau_naive, 2)`) looks authoritative. It has small standard errors, a significant p-value, and a plausible story. **It is wrong by design.**
+
+Week 11 will show you exactly *what* OLS does when it "controls for" a confounder — and where that breaks down. Week 12 will show you how to fix it.
+
+::: {.callout-tip}
+**If you want to get ahead:** the key question to hold in your head going into Week 11 is — *what exactly is the OLS estimator doing when it includes W as a control?* The Frisch-Waugh-Lovell theorem gives the precise answer. See if you can find a statement of it before the lecture.
+:::
+
+---
+
+*Slides and the Week 11 notebook will be posted to GitHub after class.*

@@ -1,0 +1,231 @@
+# Week 12: Introduction to Double Machine Learning
+
+---
+
+*Framing note: Last week we showed that FWL is the right idea but OLS partialling breaks in high dimensions. Today we fix that — properly. DML is FWL with ML in the partialling steps, plus one crucial addition: cross-fitting. Get the cross-fitting wrong and all of your inference is invalid.*
+
+---
+
+### 1. Recap: The Problem We're Solving
+
+- We want $\hat{\beta}$ = causal effect of $T$ on $Y$, controlling for high-dimensional $X$
+- FWL says: residualise $Y$ and $T$ on $X$, regress residuals
+- OLS partialling fails when $p$ is large or relationships are non-linear
+- Naïve fix: swap OLS for ML in the partialling steps
+- **Why this is still wrong**: ML models overfit to the same data they're predicting — the residuals are biased toward zero (regularisation shrinkage), and standard errors are invalid
+- *DML solves this with Neyman orthogonality and cross-fitting*
+
+---
+
+### 2. The DML Setup: Structural Model
+
+Assume the partially linear model:
+$$Y_i = m(X_i) + \tau \cdot T_i + \epsilon_i$$
+
+where:
+- $m(X_i) = \mathbb{E}[Y_i \mid X_i]$: unknown, potentially complex nuisance function
+- $\tau$: the causal parameter of interest (ATE)
+- $T_i$: treatment (can be continuous or binary)
+- $\epsilon_i \perp X_i$, $\epsilon_i \perp \tilde{T}_i$ (exogeneity)
+
+Also define the propensity / treatment model:
+$$T_i = g(X_i) + \eta_i \qquad \text{where } g(X_i) = \mathbb{E}[T_i \mid X_i]$$
+
+The two nuisance functions $m(\cdot)$ and $g(\cdot)$ are the objects ML will estimate.
+
+---
+
+### 3. The DML Algorithm
+
+**Step 1 — Fit nuisance models** (using any ML learner):
+$$\hat{m}(X) \approx \mathbb{E}[Y \mid X], \qquad \hat{g}(X) \approx \mathbb{E}[T \mid X]$$
+
+**Step 2 — Form residuals**:
+$$\tilde{Y}_i = Y_i - \hat{m}(X_i), \qquad \tilde{T}_i = T_i - \hat{g}(X_i)$$
+
+**Step 3 — Regress residualised outcome on residualised treatment**:
+$$\hat{\tau} = \frac{\sum_i \tilde{T}_i \tilde{Y}_i}{\sum_i \tilde{T}_i^2}$$
+
+This is identical in structure to FWL Step 3 — but now $\hat{m}$ and $\hat{g}$ are ML estimators, not OLS.
+
+---
+
+### 4. Cross-Fitting: The Critical Addition
+
+**The problem with fitting on the same data:**
+- ML models (especially with regularisation) overfit to training data
+- If you predict $\hat{m}(X_i)$ using a model trained on observation $i$, the residual $\tilde{Y}_i$ is artificially small — the model "memorised" $Y_i$
+- This shrinkage bias propagates into $\hat{\tau}$ — you underestimate the causal effect
+- Standard errors are also invalid: the residuals are not truly out-of-sample
+
+**Cross-fitting procedure** ($K$-fold):
+
+1. Split sample into $K$ folds $\mathcal{I}_1, \ldots, \mathcal{I}_K$
+2. For each fold $k$:
+   - Train $\hat{m}^{(-k)}$ and $\hat{g}^{(-k)}$ on all data *except* fold $k$
+   - Predict residuals for observations *in* fold $k$:
+     $$\tilde{Y}_i = Y_i - \hat{m}^{(-k)}(X_i), \quad \tilde{T}_i = T_i - \hat{g}^{(-k)}(X_i) \quad \forall i \in \mathcal{I}_k$$
+3. Stack all out-of-sample residuals, run Step 3 regression on the full set
+
+**Why this works**: each residual $\tilde{Y}_i$ and $\tilde{T}_i$ is formed using a model that never saw observation $i$ — genuine out-of-sample prediction. No shrinkage bias.
+
+---
+
+### 5. Neyman Orthogonality: Why DML Inference is Valid
+
+- Formal justification for why cross-fitting + DML gives valid standard errors
+- The DML moment condition is **Neyman orthogonal**: the score function has zero derivative with respect to the nuisance parameters at the true values
+- In plain English: small errors in estimating $\hat{m}$ and $\hat{g}$ have a *second-order* (negligible) effect on $\hat{\tau}$
+- This is why DML is sometimes called "doubly robust" in spirit: modest misspecification of the nuisance models doesn't ruin the causal estimate
+- Formal result: $\sqrt{n}(\hat{\tau} - \tau) \to \mathcal{N}(0, V)$ — asymptotically normal, standard errors are honest
+
+*You don't need to derive this — understand what it buys you: valid confidence intervals even when the nuisance models are complex ML black boxes*
+
+---
+
+### 6. Choosing ML Learners for the Nuisance Functions
+
+- Any learner can be used for $\hat{m}$ and $\hat{g}$ — they are just prediction problems
+- Practical guidance:
+
+| Setting | Good choice for nuisance models |
+|---|---|
+| Many features, likely non-linear | Random Forest, Gradient Boosting (XGBoost/LightGBM) |
+| Very high-dimensional, sparse | LASSO / ElasticNet |
+| Small $n$, structured data | Ridge regression |
+| Large $n$, complex interactions | Neural networks (with care) |
+
+- The nuisance model quality matters: better $\hat{m}$ and $\hat{g}$ → smaller residual variance → tighter $\hat{\tau}$
+- But even a mediocre learner gives *valid* inference thanks to cross-fitting — it just has wider confidence intervals
+- *Do not choose learners based on what makes $\hat{\tau}$ look good — choose based on prediction performance in cross-validation*
+
+---
+
+### 7. Inference: Standard Errors and Confidence Intervals
+
+After cross-fitting and Step 3 regression, inference proceeds as standard OLS:
+
+$$\hat{\tau} = (\tilde{T}'\tilde{T})^{-1}\tilde{T}'\tilde{Y}$$
+
+$$\text{Var}(\hat{\tau}) = \frac{\hat{\sigma}^2_\epsilon}{\sum_i \tilde{T}_i^2}$$
+
+Confidence interval: $\hat{\tau} \pm 1.96 \cdot \text{SE}(\hat{\tau})$
+
+Key insight: the denominator $\sum_i \tilde{T}_i^2$ is the **residual variation in treatment after partialling out** — observations with more exogenous variation in $T$ contribute more to identifying $\hat{\tau}$
+
+**What DML gives you that naïve ML doesn't:**
+- An estimate with a *standard error* you can trust
+- A confidence interval with proper coverage
+- A $p$-value with correct size (no size distortion from regularisation)
+
+---
+
+### 8. Comparison: Naïve OLS vs. DML
+
+| Approach | Handles high-dim $X$ | Non-linear nuisance | Valid SE | Bias |
+|---|---|---|---|---|
+| Naïve OLS (no controls) | — | — | Biased SE | Confounding bias |
+| OLS with all controls | ✗ | ✗ | Yes (if $p \ll n$) | Functional form bias |
+| Plug-in ML (no cross-fitting) | ✓ | ✓ | ✗ | Regularisation bias |
+| **DML (cross-fitting)** | **✓** | **✓** | **✓** | **Negligible** |
+
+---
+
+### 9. EconML Implementation
+
+```python
+from econml.dml import LinearDML, CausalForestDML
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.linear_model import LassoCV
+
+# Define nuisance learners
+model_y = RandomForestRegressor(n_estimators=100, max_depth=5, random_state=42)
+model_t = RandomForestRegressor(n_estimators=100, max_depth=5, random_state=42)
+
+# LinearDML: linear final stage (estimates constant ATE)
+dml = LinearDML(
+    model_y=model_y,
+    model_t=model_t,
+    discrete_treatment=False,
+    cv=5,              # number of cross-fitting folds
+    random_state=42
+)
+dml.fit(Y, T, X=X_controls)
+
+# Point estimate and confidence interval
+ate = dml.ate(X_controls)
+ate_interval = dml.ate_interval(X_controls, alpha=0.05)
+print(f"ATE: {ate:.3f}")
+print(f"95% CI: {ate_interval}")
+```
+
+---
+
+### 10. EconML Methods — When to Use What
+
+| Method | Final Stage | Best For | Key Consideration |
+|---|---|---|---|
+| `LinearDML` | Linear OLS | Constant ATE, interpretability | Assumes linearity of causal effect |
+| `ForestDML` | Random Forest | Heterogeneous effects (CATE) | More flexible; higher variance |
+| `CausalForestDML` | Causal Forest | CATE + valid CI per observation | Preferred for full CATE analysis |
+| `DRLearner` | Any learner | Doubly robust CATE estimation | Best with binary treatment |
+| `DMLIV` | Linear | Endogenous $T$ with instruments | Requires valid instrument |
+
+*This week: `LinearDML` for ATE. Next time: `CausalForestDML` and `DRLearner` for CATE.*
+
+---
+
+### 11. Manual Cross-Fitting from Scratch
+
+Understanding the mechanics before relying on the library:
+
+```python
+import numpy as np
+from sklearn.model_selection import KFold
+from sklearn.ensemble import RandomForestRegressor
+
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
+
+Y_res = np.zeros(len(Y))
+T_res = np.zeros(len(T))
+
+for train_idx, test_idx in kf.split(X):
+    X_train, X_test = X[train_idx], X[test_idx]
+    Y_train, Y_test = Y[train_idx], Y[test_idx]
+    T_train, T_test = T[train_idx], T[test_idx]
+
+    # Fit nuisance models on training fold
+    m_hat = RandomForestRegressor(n_estimators=100).fit(X_train, Y_train)
+    g_hat = RandomForestRegressor(n_estimators=100).fit(X_train, T_train)
+
+    # Predict on held-out test fold
+    Y_res[test_idx] = Y_test - m_hat.predict(X_test)
+    T_res[test_idx] = T_test - g_hat.predict(X_test)
+
+# Final stage: OLS on residuals
+from numpy.linalg import lstsq
+tau_hat, _, _, _ = lstsq(T_res.reshape(-1, 1), Y_res, rcond=None)
+print(f"DML ATE estimate: {tau_hat[0]:.3f}")
+```
+
+---
+
+### 12. What DML Doesn't Do (Yet)
+
+- This week: DML estimates a single number — the **Average Treatment Effect (ATE)**
+- Assumes $\tau$ is *constant* across individuals (or averages over heterogeneity)
+- But in marketing: some customers respond strongly, others not at all
+  - A loyal customer may not need a discount
+  - A price-sensitive new customer may respond strongly
+- To capture this heterogeneity we need the **Conditional Average Treatment Effect (CATE)**
+- *That's Week 15: same DML logic, but $\tau$ becomes a function of $X$*
+
+---
+
+## Teaching Notes
+
+- §4 (cross-fitting) is the most important new concept — spend the most time here; a diagram of the $K$-fold procedure drawn by hand is very effective
+- §5 (Neyman orthogonality) — give intuition only, not the proof; the payoff sentence is "modest errors in nuisance estimation have negligible effect on $\hat{\tau}$"
+- §9 and §11 together: show the manual version first so students understand what the library is doing, then show how `econml` wraps it
+- §12 is the natural cliffhanger into Week 15 — make it explicit that ATE is the average; the exciting case is when the effect differs by customer
+- Coding notebook: (1) manual cross-fitting loop as in §11, (2) naive ML without cross-fitting showing bias, (3) LinearDML from econml, (4) compare all three side by side on marketing mix / ad spend dataset

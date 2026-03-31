@@ -1,0 +1,477 @@
+---
+title: "ML for Causal Inference"
+subtitle: "Why and How?"
+author: "Tom Hackenberg"
+date: "30 March 2025"
+format:
+  revealjs:
+    theme: default
+    slide-number: true
+    width: 1280
+    height: 720
+    echo: true
+    warning: false
+    message: false
+execute:
+  eval: false
+---
+
+# Part A: The Toolkit
+*Consolidate what you know before we build on it*
+
+---
+
+## Today's Roadmap: Part A
+
+**The Toolkit** *(consolidate before we build)*
+
+1. Causal inference recap
+2. Machine learning taxonomy
+3. Bias–variance & regularisation
+4. Model landscape
+5. Preprocessing pipelines
+6. Dimensionality reduction & clustering
+7. Evaluation metrics
+
+---
+
+## Today's Roadmap: Part B
+
+**The Pivot** *(why ML alone is not enough)*
+
+8. Prediction ≠ causation
+9. Why regularisation breaks causal estimates
+10. High dimensions: the confounding problem
+11. Where we're going: FWL → DML → CATE
+12. The toolkit
+
+::: {.callout-note}
+**Exam scope:** all of it. Part A = consolidation; Part B = the intellectual core of this block.
+:::
+
+---
+
+## 1 · Causal Inference — The Fundamental Problem
+
+We want to know what *would have happened* — but we only ever observe one world.
+
+$$Y_i^{\text{obs}} = D_i \cdot Y_i(1) + (1 - D_i) \cdot Y_i(0)$$
+
+The counterfactual $Y_i(1-D_i)$ is forever missing.
+
+**The objects we care about**
+
+$$\text{ATE} = \mathbb{E}[Y(1) - Y(0)]$$
+
+$$\text{CATE}(x) = \mathbb{E}[Y(1) - Y(0) \mid X = x]$$
+
+* ATE: the population-level average effect.
+* CATE: *who* benefits, and *how much*?
+
+---
+
+## 1 · Causal Inference — A Canonical DAG
+
+```{dot}
+//| echo: false
+//| eval: true
+//| fig-width: 6
+//| fig-height: 4
+digraph confounding {
+  rankdir=LR;
+  node [shape=circle, style=filled, fillcolor="#eeeeee", fontname="Helvetica"];
+  
+  W [label="W\n(Confounder)"];
+  D [label="D\n(Treatment)"];
+  Y [label="Y\n(Outcome)"];
+  
+  W -> D;
+  W -> Y;
+  D -> Y [label=" causal effect"];
+}
+```
+
+*W confounds the D → Y relationship.*
+Observed correlation ≠ causal effect.
+
+---
+
+## 1 · DAG Vocabulary: Confounders & Mediators
+
+**Confounder**
+W opens a *backdoor path* from D to Y.
+→ **Block it** (condition on W).
+
+```{dot}
+//| echo: false
+//| eval: true
+//| fig-height: 2
+digraph conf {
+  rankdir=LR;
+  node [shape=circle, style=filled, fillcolor="#eeeeee"];
+  W -> D; W -> Y; D -> Y;
+}
+```
+
+**Mediator**
+M lies *on the causal path*.
+→ **Do not block** (conditioning removes effect).
+
+```{dot}
+//| echo: false
+//| eval: true
+//| fig-height: 1.5
+digraph med {
+  rankdir=LR;
+  node [shape=circle, style=filled, fillcolor="#eeeeee"];
+  D -> M -> Y; D -> Y;
+}
+```
+
+---
+
+## 1 · DAG Vocabulary: Colliders
+
+**Collider**
+C is caused by *both* D and Y.
+→ **Do not condition** (opens a spurious path).
+
+```{dot}
+//| echo: false
+//| eval: true
+//| fig-height: 2
+digraph coll {
+  rankdir=LR;
+  node [shape=circle, style=filled, fillcolor="#eeeeee"];
+  D -> C; Y -> C; D -> Y;
+}
+```
+
+**Rule of thumb:** condition on confounders, leave mediators and colliders alone.
+
+---
+
+## 2 · Machine Learning Taxonomy
+
+```{dot}
+//| echo: false
+//| eval: true
+//| fig-width: 10
+//| fig-height: 4
+digraph ml_tax {
+  rankdir=LR;
+  node [shape=box, style="filled,rounded", fontname="Helvetica"];
+  
+  ML [label="Machine\nLearning"];
+  SL  [label="Supervised"];
+  UL  [label="Unsupervised"];
+  
+  REG  [label="Regression\n(numeric)"];
+  CLS  [label="Classification\n(discrete)"];
+  CLU  [label="Clustering"];
+  DIM  [label="Dim. Reduction"];
+  
+  ML -> SL; ML -> UL;
+  SL -> REG; SL -> CLS;
+  UL -> CLU; UL -> DIM;
+}
+```
+
+We use supervised learning as our workhorse.
+**The twist:** we care about *coefficients and effects*, not just predictions.
+
+---
+
+## 3 · Bias–Variance Tradeoff
+
+$$\mathbb{E}[(\hat{f}(x) - f(x))^2] = \underbrace{\text{Bias}^2}_{\text{underfitting}} + \underbrace{\text{Variance}}_{\text{overfitting}} + \sigma^2$$
+
+* **High bias**: model too simple, misses true pattern
+* **High variance**: model too complex, memorises noise
+* **Goal**: find the sweet spot that minimises *test error*
+
+*Out-of-sample error is the only honest measure of model quality. We use k-Fold Cross-Validation to rotate held-out folds and evaluate generalisation.*
+
+---
+
+## 3 · Regularisation
+
+| Penalty | Formula | Effect |
+|---|---|---|
+| Ridge ($L_2$) | $\lambda \sum \beta_j^2$ | Shrinks all coefficients |
+| LASSO ($L_1$) | $\lambda \sum |\beta_j|$ | Shrinks *and* zeroes out |
+
+$\lambda$ is a hyperparameter tuned via cross-validation, not estimated from data.
+
+---
+
+## 4 · Model Landscape {.smaller}
+
+| Model | Interpretability | Flexibility | When to use |
+|---|---|---|---|
+| **OLS/Ridge/LASSO** | High | Low | Baseline; linear structure |
+| **Random Forest** | Medium | High | Non-linearities; robust |
+| **XGBoost/GBM** | Medium | High | Tabular data; strong out-of-box |
+| **Neural Network** | Low | Very high | Large data; complex patterns |
+
+**Random Forest:** Ensemble of trees trained on bootstrap samples with random feature subsets. Variance ↓, bias roughly stable.
+**XGBoost:** Sequential boosting: each tree corrects residuals of the previous. Built-in regularisation.
+
+::: {.callout-note}
+In causal ML we typically use RF or XGBoost as **nuisance estimators** to approximate complex functions well.
+:::
+
+---
+
+## 5 · Preprocessing Pipelines
+
+**Why preprocess?** Garbage in, garbage out.
+
+1. **Cleaning**: handle missing values
+2. **Scaling**: standardise numeric features (needed for Ridge/LASSO)
+3. **Encoding**: one-hot encode categorical variables
+
+**Why pipelines matter for causal ML:**
+Chaining steps (e.g., via Sklearn `Pipeline`) prevents **data leakage** between train/test folds. This is essential for cross-fitting in Double Machine Learning (DML).
+
+---
+
+## 5 · Pipeline Code Example
+
+```python
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+
+num_pipe = Pipeline([
+    ('impute', SimpleImputer(strategy='mean')),
+    ('scale',  StandardScaler())
+])
+cat_pipe = Pipeline([
+    ('impute', SimpleImputer(strategy='most_frequent')),
+    ('encode', OneHotEncoder(handle_unknown='ignore'))
+])
+preprocessor = ColumnTransformer([
+    ('num', num_pipe, num_cols),
+    ('cat', cat_pipe, cat_cols)
+])
+```
+
+---
+
+## 6 · Dimensionality Reduction (PCA)
+
+Projects data onto orthogonal directions of maximum variance.
+
+$$\mathbf{Z} = \mathbf{X} \mathbf{V}_k$$
+
+* Reduces noise, addresses multicollinearity
+* `explained_variance_ratio_`: track how much variance is retained (aim for 80–90%)
+* **The catch:** components are linear combinations — interpretability is lost. Fine for controls; not fine for treatment variables.
+
+```python
+from sklearn.decomposition import PCA
+pca = PCA(n_components=2)
+X_reduced = pca.fit_transform(X_scaled)
+```
+
+---
+
+## 6 · Clustering (K-Means)
+
+Partitions $n$ observations into $K$ clusters by minimising within-cluster variance.
+
+$$\min_{\{C_k\}} \sum_{k=1}^K \sum_{x \in C_k} \|x - \mu_k\|^2$$
+
+* Choosing $K$: elbow method, silhouette score
+* Marketing application: customer segmentation
+
+```python
+from sklearn.cluster import KMeans
+kmeans = KMeans(n_clusters=3, random_state=42)
+clusters = kmeans.fit_predict(X)
+```
+
+---
+
+## 7 · Evaluation Metrics {.smaller}
+
+**Regression**
+
+* **RMSE:** Penalises large errors more
+* **MAE:** Robust to outliers
+* **$R^2$:** Proportion of variance explained
+
+*In causal ML, we often care about residual quality — how well we remove confounding signal — not just overall $R^2$.*
+
+**Classification**
+Choosing a metric depends on **asymmetric costs**:
+
+* High-value campaign targeting → prioritise **Precision**
+* Disease / fraud screening → prioritise **Recall**
+* Balanced objective → **$F_1$**
+
+---
+
+# Part B: The Pivot
+*Why machine learning alone cannot answer causal questions*
+
+---
+
+## 8 · Prediction ≠ Causation {.smaller}
+
+**What ML optimises**
+$$\hat{f} = \arg\min_f \; \mathbb{E}\left[(Y - f(X))^2\right]$$
+Minimise expected prediction error. It does not care *why* $Y$ and $X$ move together.
+
+**What causal inference needs**
+$$\tau = \mathbb{E}[Y(1) - Y(0)]$$
+What happens to $Y$ when we *intervene* and change $D$?
+
+**A model with $R^2 = 0.95$ can be completely wrong about the effect of intervening on any single variable.**
+
+---
+
+## 8 · A Marketing Example
+
+```{dot}
+//| echo: false
+//| eval: true
+//| fig-width: 6
+//| fig-height: 3
+digraph mkt {
+  rankdir=LR;
+  node [shape=circle, style=filled, fillcolor="#eeeeee", fontname="Helvetica"];
+  
+  Q [label="Product\nQuality"];
+  A [label="Ad\nSpend"];
+  S [label="Sales"];
+  
+  Q -> A [label=" confounder"];
+  Q -> S;
+  A -> S [label=" causal?", style=dashed];
+}
+```
+
+* ML sees: Ad Spend correlates with Sales → predicts well.
+* Reality: Product Quality drives *both*.
+* **Increasing ad spend will not produce the predicted lift.**
+
+---
+
+## 8 · Observation vs. Intervention
+
+**Pearl's do-calculus**
+
+* **Observe:** $P(Y \mid X = x)$ (Filter data where $X = x$)
+* **Intervene:** $P(Y \mid do(X = x))$ (Set $X = x$ externally)
+
+These are equal **only** under strong assumptions (no confounding/selection bias).
+
+**Why this matters for marketing:**
+Observational users who click ads have high purchase intent anyway. Confusing observation with intervention means you are measuring self-selection, not campaign effectiveness.
+
+---
+
+## 9 · Why Regularisation Breaks Causal Inference {.smaller}
+
+**LASSO objective**
+$$\hat{\beta}^{\text{LASSO}} = \arg\min_\beta \; \|Y - X\beta\|^2 + \lambda \|\beta\|_1$$
+
+The penalty shrinks *all* coefficients — including the causal one.
+
+Suppose the true model is: $Y = \tau D + \gamma W + \varepsilon, \quad \text{Corr}(D, W) \neq 0$
+
+LASSO exploits the correlation: it may zero out $\hat{\tau}$ and let $\hat{\gamma}$ absorb the signal. The model predicts well, but the causal estimate is garbage.
+
+*The regularisation that helps prediction actively harms causal estimation.*
+
+---
+
+## 10 · High Dimensions: The Confounding Problem {.smaller}
+
+**Low dimensions — the classical solution**
+
+Include controls $W$ in OLS. $\hat{\tau}_{OLS}$ is unbiased. Simple.
+
+**High dimensions ($p > n$) — OLS breaks down**
+
+* $(X^\top X)$ becomes singular
+* Multicollinearity explodes
+* Overfitting to noise
+
+**The naive fix doesn't work**
+"Just plug in ML as the regression" introduces bias through regularisation and invalidates standard errors.
+
+**The right question is:** *"how do I use ML for nuisance estimation while preserving valid inference on the causal parameter?"*
+
+---
+
+## 11 · Where We're Going {.smaller}
+
+| Week | Topic | Key question |
+|---|---|---|
+| **9 (today)** | ML basics + pivot | Why can't I just use ML? |
+| **11** | FWL Theorem | What does "controlling for" really mean? |
+| **12** | Double Machine Learning | How do I use ML for valid causal estimates? |
+| **15** | CATE & Optimisation | Who benefits, and by how much? |
+
+**The thread:** $\underbrace{\text{FWL}}_{\text{Wk 11}} \;\longrightarrow\; \underbrace{\text{DML}}_{\text{Wk 12}} \;\longrightarrow\; \underbrace{\text{CATE}}_{\text{Wk 15}}$
+
+FWL is the algebraic engine. DML operationalises it for high dimensions. CATE personalises it.
+
+---
+
+## 12 · The Causal ML Toolkit
+
+**Python**
+
+* **`econml`** (Microsoft Research): Implements DML, Causal Forests.
+* **`doubleml`**: Dedicated DML implementation with rigorous statistical inference.
+
+```python
+from econml.dml import LinearDML
+import doubleml as dml
+```
+
+**R**
+
+* **`grf`** (Athey et al.): Generalised Random Forests. Reference implementation for CATE.
+
+```r
+library(grf)
+cf <- causal_forest(X, Y, W)
+```
+
+---
+
+## Summary
+
+**ML is a prediction machine**
+
+* Optimises $\mathbb{E}[(Y - \hat{f}(X))^2]$
+* Regularisation shrinks coefficients for generalisation
+* High $R^2$ is *not* evidence of a causal relationship
+
+**Causal inference needs more structure**
+
+* Assumptions encoded in a DAG
+* In high dimensions, ML can help, but only if used carefully.
+* The right role for ML: **nuisance estimation**, not effect estimation.
+
+---
+
+## For Next Time
+
+**Week 11 — Frisch-Waugh-Lovell Theorem**
+
+*What does "controlling for $W$" actually mean algebraically?*
+* Revise OLS in matrix form: $\hat{\beta} = (X^\top X)^{-1} X^\top Y$
+* Think about what "residualising" a variable means geometrically
+
+**Optional coding notebook (this week)**
+
+* Fit LASSO on e-commerce data — watch the treatment coefficient shrink
+* Compare OLS vs. LASSO estimates
+* Not assessed. Purely for intuition.

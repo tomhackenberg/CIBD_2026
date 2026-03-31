@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.5.57">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>week09_skeleton</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="week09_skeleton_files/libs/clipboard/clipboard.min.js"></script>
+<script src="week09_skeleton_files/libs/quarto-html/quarto.js"></script>
+<script src="week09_skeleton_files/libs/quarto-html/popper.min.js"></script>
+<script src="week09_skeleton_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="week09_skeleton_files/libs/quarto-html/anchor.min.js"></script>
+<link href="week09_skeleton_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="week09_skeleton_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="week09_skeleton_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="week09_skeleton_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="week09_skeleton_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+const typesetMath = (el) => {
+  if (window.MathJax) {
+    // MathJax Typeset
+    window.MathJax.typeset([el]);
+  } else if (window.katex) {
+    // KaTeX Render
+    var mathElements = el.getElementsByClassName("math");
+    var macros = [];
+    for (var i = 0; i < mathElements.length; i++) {
+      var texText = mathElements[i].firstChild;
+      if (mathElements[i].tagName == "SPAN") {
+        window.katex.render(texText.data, mathElements[i], {
+          displayMode: mathElements[i].classList.contains('display'),
+          throwOnError: false,
+          macros: macros,
+          fleqn: false
+        });
+      }
+    }
+  }
+}
+window.Quarto = {
+  typesetMath
+};
+</script>
+
+</head>
+
+<body class="fullcontent">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+
+
+
+<section id="week-9-ml-for-causal-inference-why-and-how" class="level1">
+<h1>Week 9: ML for Causal Inference — Why and How?</h1>
+<hr>
+<section id="part-a-machine-learning-basics" class="level2">
+<h2 class="anchored" data-anchor-id="part-a-machine-learning-basics">Part A: Machine Learning Basics</h2>
+<p><em>Framing note for students: This section is foundational — make sure you’re comfortable with it. It’s fair game for the exam and gives you the toolkit for everything that follows. If you know this already, use the time to consolidate.</em></p>
+<hr>
+<section id="recap-causal-inference-fundamentals" class="level3">
+<h3 class="anchored" data-anchor-id="recap-causal-inference-fundamentals">1. Recap: Causal Inference Fundamentals</h3>
+<ul>
+<li>Correlation vs.&nbsp;causation — the core distinction
+<ul>
+<li>Sleeping with shoes on and waking up with a headache</li>
+<li>Moving together ≠ one causes the other</li>
+</ul></li>
+<li>Potential outcomes framework (brief recap from Part 1)
+<ul>
+<li><span class="math inline">\(Y_i(1)\)</span>, <span class="math inline">\(Y_i(0)\)</span>: what would have happened under each treatment</li>
+<li>The fundamental problem of causal inference: we only observe one</li>
+</ul></li>
+<li>Average Treatment Effect (ATE) <span class="math display">\[ATE = \mathbb{E}[Y(1) - Y(0)]\]</span></li>
+<li>Conditional Average Treatment Effect (CATE) <span class="math display">\[CATE(x) = \mathbb{E}[Y(1) - Y(0) \mid X = x]\]</span></li>
+<li>Directed Acyclic Graphs (DAGs)
+<ul>
+<li>Nodes = variables, edges = causal direction, no cycles</li>
+<li>Purpose: make causal assumptions explicit and visible</li>
+<li>Confounders, mediators, colliders — visual identification</li>
+</ul></li>
+</ul>
+<hr>
+</section>
+<section id="types-of-machine-learning" class="level3">
+<h3 class="anchored" data-anchor-id="types-of-machine-learning">2. Types of Machine Learning</h3>
+<ul>
+<li><strong>Supervised learning</strong>: labelled data, learn input → output mapping
+<ul>
+<li>Regression: predict numeric outcome (e.g.&nbsp;sales revenue)</li>
+<li>Classification: predict class label (e.g.&nbsp;churn / no churn)</li>
+</ul></li>
+<li><strong>Unsupervised learning</strong>: no labels, find structure
+<ul>
+<li>Clustering (K-Means), dimensionality reduction (PCA)</li>
+</ul></li>
+<li><strong>Semi-supervised learning</strong>: few labels, many unlabelled</li>
+<li><strong>Reinforcement learning</strong>: reward/penalty feedback loop</li>
+<li><em>Key point</em>: most of what we do in causal ML is supervised — but with a twist</li>
+</ul>
+<hr>
+</section>
+<section id="practical-challenges-of-machine-learning" class="level3">
+<h3 class="anchored" data-anchor-id="practical-challenges-of-machine-learning">3. Practical Challenges of Machine Learning</h3>
+<ul>
+<li>Data quality: insufficient quantity, non-representative samples, noise</li>
+<li>Feature engineering: picking the right variables matters</li>
+<li><strong>Underfitting vs.&nbsp;Overfitting</strong>
+<ul>
+<li>Underfitting: model too simple, high bias</li>
+<li>Overfitting: model too complex, memorises training noise</li>
+<li>The bias-variance tradeoff</li>
+</ul></li>
+<li><strong>Regularisation</strong>: penalise complexity to prevent overfitting
+<ul>
+<li>Ridge (<span class="math inline">\(L_2\)</span>): shrinks coefficients</li>
+<li>LASSO (<span class="math inline">\(L_1\)</span>): shrinks and zeros out coefficients</li>
+<li>Hyperparameter <span class="math inline">\(\lambda\)</span> controls the amount of regularisation</li>
+</ul></li>
+<li><strong>Validation strategy</strong>
+<ul>
+<li>Train/test split: generalisation error = out-of-sample error</li>
+<li>Cross-validation: <span class="math inline">\(k\)</span>-fold, rotating held-out folds</li>
+</ul></li>
+</ul>
+<hr>
+</section>
+<section id="overview-of-ml-models" class="level3">
+<h3 class="anchored" data-anchor-id="overview-of-ml-models">4. Overview of ML Models</h3>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 25%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Model Type</th>
+<th>Interpretability</th>
+<th>Flexibility</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Linear (OLS, Ridge, LASSO)</td>
+<td>High</td>
+<td>Low</td>
+<td>Baseline; assumes linearity</td>
+</tr>
+<tr class="even">
+<td>Tree-based (RF, XGBoost)</td>
+<td>Medium</td>
+<td>High</td>
+<td>Handles non-linearities; feature importance</td>
+</tr>
+<tr class="odd">
+<td>Neural Networks (MLP)</td>
+<td>Low</td>
+<td>Very High</td>
+<td>Powerful; expensive; needs tuning</td>
+</tr>
+</tbody>
+</table>
+<hr>
+</section>
+<section id="data-preprocessing-pipelines" class="level3">
+<h3 class="anchored" data-anchor-id="data-preprocessing-pipelines">5. Data Preprocessing Pipelines</h3>
+<ul>
+<li>Why preprocess? Garbage in, garbage out — for both prediction <em>and</em> causal estimation</li>
+<li>Key steps:
+<ul>
+<li><strong>Cleaning</strong>: handle missing values (imputation strategies)</li>
+<li><strong>Scaling</strong>: standardise numeric features (mean 0, std 1)</li>
+<li><strong>Encoding</strong>: one-hot encode categorical variables</li>
+</ul></li>
+<li>Sklearn <code>Pipeline</code> + <code>ColumnTransformer</code>: chain steps cleanly</li>
+<li><em>Why pipelines matter for causal ML</em>: prevents data leakage between train/test folds; essential for cross-fitting later</li>
+</ul>
+<div class="sourceCode" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> sklearn.pipeline <span class="im">import</span> Pipeline</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> sklearn.compose <span class="im">import</span> ColumnTransformer</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> sklearn.impute <span class="im">import</span> SimpleImputer</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> sklearn.preprocessing <span class="im">import</span> StandardScaler, OneHotEncoder</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>num_transformer <span class="op">=</span> Pipeline([</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    (<span class="st">'impute'</span>, SimpleImputer(strategy<span class="op">=</span><span class="st">'mean'</span>)),</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    (<span class="st">'scale'</span>, StandardScaler())</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>])</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>cat_transformer <span class="op">=</span> Pipeline([</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>    (<span class="st">'impute'</span>, SimpleImputer(strategy<span class="op">=</span><span class="st">'most_frequent'</span>)),</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>    (<span class="st">'encode'</span>, OneHotEncoder(handle_unknown<span class="op">=</span><span class="st">'ignore'</span>))</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>])</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>preprocessor <span class="op">=</span> ColumnTransformer([</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>    (<span class="st">'num'</span>, num_transformer, num_cols),</span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>    (<span class="st">'cat'</span>, cat_transformer, cat_cols)</span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>])</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<hr>
+</section>
+<section id="dimensionality-reduction-pca" class="level3">
+<h3 class="anchored" data-anchor-id="dimensionality-reduction-pca">6. Dimensionality Reduction: PCA</h3>
+<ul>
+<li>Projects data onto orthogonal axes of maximum variance</li>
+<li>Reduces noise, addresses multicollinearity, speeds up computation</li>
+<li><code>explained_variance_ratio_</code>: how much variance each component captures</li>
+<li>Limitation: components are linear combinations — interpretability is lost</li>
+</ul>
+<div class="sourceCode" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> sklearn.decomposition <span class="im">import</span> PCA</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>pca <span class="op">=</span> PCA(n_components<span class="op">=</span><span class="dv">2</span>)</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>X_reduced <span class="op">=</span> pca.fit_transform(X)</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pca.explained_variance_ratio_)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<hr>
+</section>
+<section id="clustering-k-means" class="level3">
+<h3 class="anchored" data-anchor-id="clustering-k-means">7. Clustering: K-Means</h3>
+<ul>
+<li>Unsupervised: partition <span class="math inline">\(n\)</span> observations into <span class="math inline">\(K\)</span> clusters</li>
+<li>Minimises within-cluster variance (inertia)</li>
+<li>Choosing <span class="math inline">\(K\)</span>: elbow method, silhouette score</li>
+<li>Marketing application: customer segmentation</li>
+</ul>
+<div class="sourceCode" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> sklearn.cluster <span class="im">import</span> KMeans</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>kmeans <span class="op">=</span> KMeans(n_clusters<span class="op">=</span><span class="dv">3</span>, random_state<span class="op">=</span><span class="dv">42</span>)</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>clusters <span class="op">=</span> kmeans.fit_predict(X)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<hr>
+</section>
+<section id="evaluation-metrics" class="level3">
+<h3 class="anchored" data-anchor-id="evaluation-metrics">8. Evaluation Metrics</h3>
+<p><strong>Regression</strong> - RMSE: penalises large errors more - MAE: average absolute error, robust to outliers - <span class="math inline">\(R^2\)</span>: proportion of variance explained</p>
+<p><strong>Classification</strong> <span class="math display">\[\text{Precision} = \frac{TP}{TP+FP} \qquad \text{Recall} = \frac{TP}{TP+FN}\]</span> <span class="math display">\[F_1 = \frac{2 \times \text{Precision} \times \text{Recall}}{\text{Precision} + \text{Recall}}\]</span> <span class="math display">\[\text{Accuracy} = \frac{TP+TN}{TP+FP+TN+FN}\]</span></p>
+<ul>
+<li><em>Which metric to use?</em> Depends on the cost of false positives vs.&nbsp;false negatives</li>
+</ul>
+<hr>
+</section>
+</section>
+<section id="part-b-why-ml-alone-isnt-enough-for-causal-questions" class="level2">
+<h2 class="anchored" data-anchor-id="part-b-why-ml-alone-isnt-enough-for-causal-questions">Part B: Why ML Alone Isn’t Enough for Causal Questions</h2>
+<p><em>Framing note for students: This is where the course pivots. What follows is the core intellectual contribution of this half — and where the exam gets harder.</em></p>
+<hr>
+<section id="the-prediction-vs.-causation-gap" class="level3">
+<h3 class="anchored" data-anchor-id="the-prediction-vs.-causation-gap">9. The Prediction vs.&nbsp;Causation Gap</h3>
+<ul>
+<li>ML is optimised to minimise prediction error — not to recover causal effects</li>
+<li>A perfectly predictive model can be completely wrong about causation</li>
+<li>Example: an algorithm predicts high sales in regions with high ad spend
+<ul>
+<li>But both may be driven by product quality — a confounder</li>
+<li>Intervening on ad spend will not produce the predicted sales lift</li>
+</ul></li>
+<li>Formal distinction:
+<ul>
+<li><strong>Prediction</strong>: <span class="math inline">\(\hat{Y} = f(X)\)</span> — minimise <span class="math inline">\(\mathbb{E}[(Y - \hat{Y})^2]\)</span></li>
+<li><strong>Causal effect</strong>: <span class="math inline">\(\mathbb{E}[Y(t_1) - Y(t_0)]\)</span> — requires counterfactual reasoning</li>
+</ul></li>
+<li><em>You cannot get from one to the other without additional structure</em></li>
+</ul>
+<hr>
+</section>
+<section id="why-regularisation-breaks-causal-inference" class="level3">
+<h3 class="anchored" data-anchor-id="why-regularisation-breaks-causal-inference">10. Why Regularisation Breaks Causal Inference</h3>
+<ul>
+<li>LASSO minimises prediction error + <span class="math inline">\(\lambda \|\beta\|_1\)</span></li>
+<li>It shrinks <em>all</em> coefficients — including the causal one</li>
+<li>If the treatment variable <span class="math inline">\(T\)</span> is correlated with controls <span class="math inline">\(X\)</span>, LASSO may shrink <span class="math inline">\(\hat{\beta}_T\)</span> toward zero even if the true effect is large</li>
+<li>Post-selection inference problem: choosing variables based on LASSO, then running OLS on the selected set, invalidates standard errors</li>
+<li><em>The regularisation that helps prediction actively harms causal estimation</em></li>
+</ul>
+<hr>
+</section>
+<section id="the-omitted-variable-confounding-problem-at-scale" class="level3">
+<h3 class="anchored" data-anchor-id="the-omitted-variable-confounding-problem-at-scale">11. The Omitted Variable / Confounding Problem at Scale</h3>
+<ul>
+<li>In low dimensions: add controls to OLS, get unbiased estimate</li>
+<li>In high dimensions (<span class="math inline">\(p\)</span> large, possibly <span class="math inline">\(p &gt; n\)</span>): OLS breaks down
+<ul>
+<li>Cannot invert <span class="math inline">\(X'X\)</span>, multicollinearity explodes, overfitting</li>
+</ul></li>
+<li>Naively adding ML to “control for everything” doesn’t solve this
+<ul>
+<li>ML residuals are biased by regularisation</li>
+<li>Standard errors are invalid post-selection</li>
+</ul></li>
+<li><em>We need a principled way to use ML for nuisance estimation while preserving valid inference on the causal parameter — that’s what DML does</em></li>
+</ul>
+<hr>
+</section>
+<section id="roadmap-where-were-going" class="level3">
+<h3 class="anchored" data-anchor-id="roadmap-where-were-going">12. Roadmap: Where We’re Going</h3>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Week</th>
+<th>Topic</th>
+<th>Key Question</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>9 (today)</td>
+<td>ML basics + prediction vs.&nbsp;causation</td>
+<td>Why can’t I just use ML?</td>
+</tr>
+<tr class="even">
+<td>11</td>
+<td>Frisch-Waugh-Lovell Theorem</td>
+<td>What does “controlling for” really mean?</td>
+</tr>
+<tr class="odd">
+<td>12</td>
+<td>Double Machine Learning</td>
+<td>How do I use ML to get valid causal estimates?</td>
+</tr>
+<tr class="even">
+<td>15</td>
+<td>CATE &amp; Marketing Optimisation</td>
+<td>Who benefits from treatment, and by how much?</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>The thread: <strong>FWL is the engine → DML operationalises it → CATE personalises it</strong></li>
+<li>Everything builds on today’s foundations</li>
+</ul>
+<hr>
+</section>
+<section id="introducing-the-toolkit" class="level3">
+<h3 class="anchored" data-anchor-id="introducing-the-toolkit">13. Introducing the Toolkit</h3>
+<ul>
+<li><strong><code>econml</code></strong> (Microsoft): primary library for causal ML in Python</li>
+<li><strong><code>doubleml</code></strong>: dedicated DML implementation with inference</li>
+<li><strong><code>grf</code></strong> (R): generalised random forests for causal effects</li>
+<li><em>Note on language</em>: Quarto runs Python and R in the same document — the method matters, not the language. Pick the right tool for the job.</li>
+</ul>
+<hr>
+</section>
+</section>
+<section id="teaching-notes" class="level2">
+<h2 class="anchored" data-anchor-id="teaching-notes">Teaching Notes</h2>
+<ul>
+<li>Part A can be covered quickly if students have ML background — use it to consolidate vocabulary</li>
+<li>The “why regularisation breaks causation” section (§10) is the conceptual pivot — spend time here</li>
+<li>The roadmap slide (§12) is worth returning to at the start of each subsequent week</li>
+<li>Coding notebook for this week: fit LASSO on e-commerce data, show coefficient instability, introduce Quarto bilingual workflow</li>
+</ul>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    // For code content inside modals, clipBoardJS needs to be initialized with a container option
+    // TODO: Check when it could be a function (https://github.com/zenorocha/clipboard.js/issues/860)
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      // TODO in 1.5, we should make sure this works without a callout special case
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

@@ -1,0 +1,208 @@
+/*-- custom.scss --------------------------------------------------
+   Dark academic theme for ADS & Marketing lecture series
+   Pair with: format: revealjs → theme: [default, custom.scss]
+----------------------------------------------------------------*/
+/* ── Fonts ─────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap');
+
+/* ── Colour palette ─────────────────────────────────────────── */
+$bg:          #0f1117;
+$bg-section:  #101820;
+$surface:     #1e2d3d;
+$surface-alt: #1a3040;
+$border:      #2a3a4a;
+
+$text:        #d0dce8;
+$text-muted:  #607080;
+$text-dim:    #8090a0;
+
+$accent-blue: #5a9abf;
+$accent-teal: #7ecba1;
+$accent-gold: #c8b080;
+$accent-red:  #e07070;
+
+
+/*-- scss:rules --*/
+
+/* ── Base reveal overrides ──────────────────────────────────── */
+.reveal {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 400;
+  color: $text;
+  background-color: $bg;
+}
+
+.reveal .slides {
+  text-align: left;
+}
+
+/* ── Headings ───────────────────────────────────────────────── */
+.reveal h1, .reveal h2 {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-weight: 700;
+  color: #eef2f6;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+.reveal h3, .reveal h4 {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-weight: 600;
+  color: $accent-blue;
+  text-transform: none;
+}
+
+/* ── Slide layout ───────────────────────────────────────────── */
+.reveal .slide-content {
+  padding: 0.5em 0.2em;
+}
+
+/* ── Section title slides ───────────────────────────────────── */
+.section-slide {
+  background-color: $bg-section !important;
+}
+
+/* ── Links ──────────────────────────────────────────────────── */
+.reveal a {
+  color: $accent-blue;
+  text-decoration: none;
+  border-bottom: 1px solid rgba($accent-blue, 0.4);
+}
+
+.reveal a:hover {
+  color: lighten($accent-blue, 15%);
+  border-bottom-color: $accent-blue;
+}
+
+/* ── Code blocks ─────────────────────────────────────────────── */
+.reveal pre {
+  background: #0d1520;
+  border: 1px solid $border;
+  border-radius: 6px;
+  box-shadow: none;
+  font-size: 0.78em;
+}
+
+.reveal code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.9em;
+  color: #a8d0b0;
+  background: rgba(#1e3a28, 0.5);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+
+.reveal pre code {
+  background: transparent;
+  color: #c8e0d0;
+  padding: 0;
+}
+
+/* ── Tables ──────────────────────────────────────────────────── */
+.reveal table {
+  border-collapse: collapse;
+  font-size: 0.82em;
+  width: 100%;
+}
+
+.reveal table th {
+  background: $surface;
+  color: $accent-blue;
+  font-weight: 600;
+  padding: 0.5em 0.8em;
+  border-bottom: 2px solid $border;
+  text-align: left;
+}
+
+.reveal table td {
+  padding: 0.4em 0.8em;
+  border-bottom: 1px solid $border;
+  color: $text;
+}
+
+.reveal table tr:nth-child(even) td {
+  background: rgba($surface, 0.4);
+}
+
+/* ── Callouts ────────────────────────────────────────────────── */
+.callout {
+  border-radius: 6px;
+  font-size: 0.84em;
+  margin-top: 1em;
+}
+
+.callout-note {
+  background: rgba($surface, 0.6);
+  border-left: 3px solid $accent-blue;
+  color: $text-dim;
+}
+
+.callout-tip {
+  background: rgba(#0e2820, 0.8);
+  border-left: 3px solid $accent-teal;
+  color: $text-dim;
+}
+
+.callout-warning {
+  background: rgba(#201808, 0.8);
+  border-left: 3px solid $accent-gold;
+  color: $text-dim;
+}
+
+.callout-important {
+  background: rgba(#200808, 0.8);
+  border-left: 3px solid $accent-red;
+  color: $text-dim;
+}
+
+/* ── Math / MathJax ──────────────────────────────────────────── */
+.reveal .MathJax {
+  color: #c8d8e8 !important;
+}
+
+/* ── Columns ─────────────────────────────────────────────────── */
+.reveal .columns {
+  display: flex;
+  gap: 1.5em;
+  align-items: flex-start;
+}
+
+/* ── Footer ──────────────────────────────────────────────────── */
+.reveal .footer {
+  font-size: 0.65em;
+  color: $text-muted;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* ── Slide number ────────────────────────────────────────────── */
+.reveal .slide-number {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65em;
+  color: $text-muted;
+  background: transparent;
+}
+
+/* ── Progress bar ────────────────────────────────────────────── */
+.reveal .progress span {
+  background: $accent-blue;
+}
+
+/* ── Graphviz / dot output ───────────────────────────────────── */
+.reveal .cell-output-display svg {
+  background: transparent !important;
+  max-width: 100%;
+  height: auto;
+}
+
+/* ── Strong / em ─────────────────────────────────────────────── */
+.reveal strong {
+  font-weight: 700;
+  color: #eef2f6;
+}
+
+.reveal em {
+  font-style: italic;
+  color: $text-dim;
+}

@@ -1,0 +1,268 @@
+# Week 15: Heterogeneous Treatment Effects & Marketing Optimisation
+
+---
+
+*Framing note: We've built the full causal ML toolkit — from why ML alone fails, through FWL, to DML for valid ATE estimation. Today we unlock the most commercially valuable extension: not just the average effect, but who responds, by how much, and what to do about it. This is where causal ML meets business optimisation.*
+
+---
+
+### 1. From ATE to CATE: Why Heterogeneity Matters
+
+- DML gave us $\hat{\tau}$ — the Average Treatment Effect across all individuals
+- But averages hide enormous variation:
+  - A discount campaign with ATE = £5 revenue lift might actually:
+    - Lift loyal customers by £0 (they would have bought anyway)
+    - Lift price-sensitive new customers by £20
+    - Cannibalise margin with deal-seekers: lift = −£10
+- A manager acting on the ATE alone sends the same intervention to everyone
+- **CATE** = $\tau(x) = \mathbb{E}[Y(1) - Y(0) \mid X = x]$: the expected treatment effect for an individual with characteristics $x$
+- This is the object that enables **personalised decision-making**
+
+---
+
+### 2. The CATE Estimation Problem
+
+- We still cannot observe both $Y_i(1)$ and $Y_i(0)$ for the same individual — the fundamental problem of causal inference
+- But we can estimate $\tau(x)$ from data if we have:
+  - **Unconfoundedness**: $Y(0), Y(1) \perp T \mid X$ (satisfied under DML assumptions)
+  - **Overlap**: $0 < P(T=1 \mid X=x) < 1$ for all $x$ (everyone has some chance of treatment)
+- The DML structural model extends naturally:
+  $$Y_i = m(X_i) + \tau(X_i) \cdot T_i + \epsilon_i$$
+  - Now $\tau(\cdot)$ is a *function* to be estimated, not a scalar
+- We still residualise: $\tilde{Y}_i = Y_i - \hat{m}(X_i)$, $\tilde{T}_i = T_i - \hat{g}(X_i)$
+- The residual relationship is:
+  $$\tilde{Y}_i = \tau(X_i) \cdot \tilde{T}_i + \text{error}$$
+
+---
+
+### 3. The Pseudo-Outcome: Turning CATE into a Supervised Learning Problem
+
+- Rearrange the causal loss function:
+$$\mathcal{L}(\tau) = \frac{1}{N} \sum_{i=1}^N \left(\tilde{Y}_i - \tau(X_i)\tilde{T}_i\right)^2$$
+- Factor $\tilde{T}_i$ out of each squared term:
+$$= \frac{1}{N} \sum_{i=1}^N \tilde{T}_i^2 \left(\frac{\tilde{Y}_i}{\tilde{T}_i} - \tau(X_i)\right)^2$$
+- Define:
+  - **Pseudo-outcome (target)**: $z_i = \dfrac{\tilde{Y}_i}{\tilde{T}_i}$ — "leftover outcome per unit of leftover treatment"
+  - **Sample weight**: $w_i = \tilde{T}_i^2$ — observations with more exogenous treatment variation count more
+
+$$\mathcal{L}(\tau) = \frac{1}{N} \sum_{i=1}^N w_i \left(z_i - \tau(X_i)\right)^2$$
+
+- This is now a **weighted supervised regression**: predict $z_i$ from $X_i$ with weights $w_i$
+- Any regression model can estimate $\tau(\cdot)$: linear, tree-based, neural network
+- *This is what turns causal inference into a standard ML task — once you have residuals*
+
+---
+
+### 4. Meta-Learner Taxonomy
+
+Meta-learners use standard ML models as building blocks to estimate CATE. Each makes different assumptions and has different failure modes.
+
+#### S-Learner (Single model)
+
+- Fit one model on $(Y, T, X)$: $\hat{\mu}(t, x) = \hat{\mathbb{E}}[Y \mid T=t, X=x]$
+- CATE: $\hat{\tau}(x) = \hat{\mu}(1, x) - \hat{\mu}(0, x)$
+- **Risk**: if the model regularises $T$ (e.g. LASSO), the treatment effect is shrunk toward zero. Works poorly when $T$ has weak signal relative to $X$.
+
+#### T-Learner (Two models)
+
+- Fit separate models for treated and control:
+  - $\hat{\mu}_1(x) = \hat{\mathbb{E}}[Y \mid T=1, X=x]$ on treated subsample
+  - $\hat{\mu}_0(x) = \hat{\mathbb{E}}[Y \mid T=0, X=x]$ on control subsample
+- CATE: $\hat{\tau}(x) = \hat{\mu}_1(x) - \hat{\mu}_0(x)$
+- **Risk**: estimates don't "talk to each other"; high variance when treated/control groups have very different sample sizes
+
+#### X-Learner (Cross-fitting across groups)
+
+1. Fit $\hat{\mu}_1$ and $\hat{\mu}_0$ as in T-learner
+2. Impute individual treatment effects:
+   - For treated: $\tilde{D}_i^1 = Y_i - \hat{\mu}_0(X_i)$
+   - For control: $\tilde{D}_i^0 = \hat{\mu}_1(X_i) - Y_i$
+3. Fit a model of $\tilde{D}^1$ on $X$ (call it $\hat{\tau}_1$) and of $\tilde{D}^0$ on $X$ (call it $\hat{\tau}_0$)
+4. Combine: $\hat{\tau}(x) = e(x)\hat{\tau}_0(x) + (1-e(x))\hat{\tau}_1(x)$ where $e(x)$ is the propensity score
+- **Strength**: works well with imbalanced treatment groups; borrows information across groups
+- **Best for**: observational data with unequal treated/control splits
+
+#### Comparison
+
+| Learner | Simple? | Handles imbalance? | Risk |
+|---|---|---|---|
+| S-Learner | ✓ | ✓ | Treatment shrinkage |
+| T-Learner | Medium | ✗ | High variance, no borrowing |
+| X-Learner | Complex | ✓ | Requires propensity score |
+
+---
+
+### 5. Causal Forests (Generalised Random Forests)
+
+- Tree-based method designed specifically for CATE estimation
+- Builds many trees, but each split is chosen to **maximise heterogeneity in treatment effects** (not prediction accuracy)
+- Honest estimation: uses separate subsamples for splitting and estimation within each leaf — reduces overfitting bias
+- Local averaging: $\hat{\tau}(x)$ is a weighted average of outcomes of "nearby" observations in feature space
+- **Pointwise confidence intervals**: unlike meta-learners, GRF provides valid CIs for $\hat{\tau}(x)$ at each $x$
+- Implementation: `econml.dml.CausalForestDML` (Python) or `grf::causal_forest` (R)
+
+```python
+from econml.dml import CausalForestDML
+from sklearn.ensemble import GradientBoostingRegressor
+
+cf = CausalForestDML(
+    model_y=GradientBoostingRegressor(),
+    model_t=GradientBoostingRegressor(),
+    n_estimators=200,
+    min_samples_leaf=10,
+    cv=5,
+    random_state=42
+)
+cf.fit(Y, T, X=X_features)
+
+# CATE estimates for each individual
+tau_hat = cf.effect(X_features)
+
+# Pointwise confidence intervals
+tau_lb, tau_ub = cf.effect_interval(X_features, alpha=0.05)
+```
+
+---
+
+### 6. The Evaluation Problem
+
+- You cannot evaluate CATE estimates by comparing $\hat{\tau}(x)$ to the true $\tau(x)$ — counterfactuals are never observed
+- How do you know if your CATE model is good?
+
+#### Sorted Group Average Treatment Effects (GATES)
+
+- Sort individuals by $\hat{\tau}(x)$ from highest to lowest predicted effect
+- Group into deciles, estimate ATE within each decile (using DML or IPW)
+- A good model: ATE in top decile >> ATE in bottom decile
+- Reveals whether the ranking of individuals is meaningful
+
+#### Qini Curve / AUUC
+
+- Cumulative treatment effect as you move down the ranked list
+- X-axis: proportion of population treated (from highest to lowest $\hat{\tau}$)
+- Y-axis: cumulative incremental outcome
+- **Area Under the Uplift Curve (AUUC)**: higher = better targeting
+- Compare to random targeting (flat line) and perfect model (theoretical upper bound)
+
+#### AUTOC (Average Uplift Treatment Ordering Coefficient)
+
+- Formalises the Qini curve into a single number with a valid test statistic
+- Can test whether CATE heterogeneity is statistically significant
+
+*The key point: evaluation of CATE models is a fundamentally different problem from evaluating predictive models — you need purpose-built tools.*
+
+---
+
+### 7. From CATEs to Business Optimisation
+
+**Step 1: Estimate CATEs** using DML + Causal Forest
+
+**Step 2: Target based on estimated CATEs**
+- Treat only individuals with $\hat{\tau}(x) > c$ where $c$ is a cost threshold
+- Example: if a discount costs £5 and revenue lift $\hat{\tau}(x) < £5$, don't send it
+
+**Step 3: Build a Policy**
+
+Simple targeting rule:
+$$\pi(x) = \mathbf{1}[\hat{\tau}(x) > \text{cost of treatment}]$$
+
+Policy trees (interpretable):
+- Fit a shallow decision tree on $\hat{\tau}(x)$ using `econml.policy.PolicyTree`
+- Output: simple if-then rule (e.g. "target customers with age > 35 AND tenure > 12 months")
+- Interpretable for business stakeholders; easy to implement in CRM systems
+
+**Step 4: Estimate policy value**
+- Expected revenue from personalised policy vs. treat-all vs. treat-none
+- Use DML-based value estimation for valid inference on policy gain
+
+---
+
+### 8. Practical Implementation: Full CATE Pipeline
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from econml.dml import CausalForestDML
+from econml.policy import PolicyTree
+from sklearn.ensemble import GradientBoostingRegressor
+
+# 1. Fit Causal Forest DML
+cf = CausalForestDML(
+    model_y=GradientBoostingRegressor(),
+    model_t=GradientBoostingRegressor(),
+    n_estimators=200, cv=5, random_state=42
+)
+cf.fit(Y, T, X=X_features)
+
+# 2. Estimate individual CATEs
+tau_hat = cf.effect(X_features)
+
+# 3. Plot CATE distribution
+plt.figure(figsize=(8, 4))
+plt.hist(tau_hat, bins=50, edgecolor='k', alpha=0.7)
+plt.axvline(np.mean(tau_hat), color='red', linestyle='--', label=f'ATE = {np.mean(tau_hat):.2f}')
+plt.xlabel('Estimated Treatment Effect')
+plt.ylabel('Count')
+plt.title('Distribution of Individual Treatment Effects (CATE)')
+plt.legend()
+plt.tight_layout()
+
+# 4. Build interpretable policy tree
+cost_of_treatment = 5.0  # e.g. £5 discount cost
+policy = PolicyTree(max_depth=2)
+policy.fit(X_features, tau_hat - cost_of_treatment)
+policy.plot()
+
+# 5. Targeting rule
+target = tau_hat > cost_of_treatment
+print(f"Proportion to target: {target.mean():.1%}")
+print(f"Expected avg lift among targeted: {tau_hat[target].mean():.2f}")
+```
+
+---
+
+### 9. X-Learner Implementation (Alternative)
+
+```python
+from econml.metalearners import XLearner
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+
+xl = XLearner(
+    models=GradientBoostingRegressor(),
+    propensity_model=RandomForestRegressor()
+)
+xl.fit(Y, T, X=X_features)
+tau_xl = xl.effect(X_features)
+```
+
+---
+
+### 10. Course Closing: The Full Toolkit
+
+| Week | Tool | What it does |
+|---|---|---|
+| 9 | ML basics + prediction/causation gap | Why ML alone isn't enough |
+| 11 | FWL Theorem | What "controlling for" means mathematically |
+| 12 | Double ML (ATE) | Valid causal estimates in high dimensions |
+| 15 | CATE + Causal Forests | Who responds, by how much |
+| 15 | Policy trees + Qini | Turn causal estimates into business decisions |
+
+**The through-line**: every method in this half of the course is doing one thing — isolating the variation in treatment that is exogenous to the confounders, and using it to estimate a causal effect. FWL named it. DML operationalised it. CATE personalised it.
+
+**Where does this go next?** (pointers for curious students)
+- Instrumental variables + DML (DMLIV) for endogenous treatments
+- Difference-in-differences with ML (DML-DiD)
+- Reinforcement learning for dynamic treatment policies
+- Synthetic control methods for aggregate-level causal inference
+
+---
+
+## Teaching Notes
+
+- §1 motivation is crucial — open with a concrete business scenario where the ATE answer is wrong and the CATE answer is right
+- §3 (pseudo-outcome derivation) connects directly back to the DML math — worth spending time here so students see the continuity
+- §4 meta-learner taxonomy: present as a decision framework, not just a list — "which would you use if your treated group is 5x smaller than your control group?"
+- §6 (evaluation) is often neglected in courses and is genuinely hard — worth acknowledging the difficulty and spending real time on Qini curves
+- §7–8 (policy optimisation) is the business payoff of the whole course — make it feel like a complete workflow
+- §10 closing: return to the Week 9 roadmap slide, go through each row, and show how the pieces fit. This is a 5-minute investment that dramatically improves retention.
+- Coding notebook: causal forest on promotions/coupon data → CATE histogram → Qini curve → policy tree → targeting rule. The visual outputs here are very effective for student engagement.
