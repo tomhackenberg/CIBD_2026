@@ -21,7 +21,7 @@ execute:
   message: false
 ---
 
-> **This notebook is optional.** Nothing here is required for the exam. It exists for students who want to build intuition early — and to demonstrate that Quarto runs R and Python side by side without friction. Most cells take under a second to run.
+> **This notebook is optional.** Nothing here is required for the exam. It exists for students who want to build intuition early — and for the curious, to get hands-on with the tools before the lectures build on them. Most cells take under a second to run.
 
 ---
 
@@ -47,9 +47,7 @@ quarto preview week09/week09_notebook.qmd
 
 That is it. `uv sync` created a `.venv/` folder in the repo root, and `_quarto.yml` tells Quarto to use it automatically — no activation step needed.
 
-::: {.callout-note}
-**R packages** — if the DAG chunk (the R cell below) throws an error, open R and run `renv::restore(prompt = FALSE)` from the repo root. This only needs to be done once.
-:::
+
 
 ---
 
@@ -62,11 +60,10 @@ A reminder that aggregated data lies. We build the paradox from scratch, visuali
 We generate a simple synthetic dataset, fit a naïve OLS in Python, and watch a coefficient we should not trust look very convincing. This is the number Week 12 will explain.
 
 ::: {.callout-note}
-**On language.** This course is method-agnostic. Quarto handles R and Python in the same document — each chunk is labelled `{r}` or `{python}`. You do not need both installed; use whichever you prefer and read the other. The exam will not test syntax.
+**On language.** This course is method-agnostic — notebooks will use both Python and R across the block. This particular notebook is Python only. The exam will not test syntax.
 :::
 
 ---
-
 
 # Part 1 — Simpson's Paradox
 
@@ -198,37 +195,56 @@ plt.show()
 
 The paradox has a clean causal explanation. Customer segment drives *both* which campaign a customer was assigned to (confounding the comparison) *and* their baseline conversion rate. Segment is a confounder.
 
-We can draw this precisely. Let's switch to R.
+We can draw this precisely using `networkx`.
 
-```{r}
-#| label: dag-r
+```{python}
+#| label: dag-python
 #| fig-cap: "DAG — customer segment confounds the campaign–conversion relationship"
+import networkx as nx
 
-library(dagitty)
-library(ggdag)
-library(ggplot2)
+G = nx.DiGraph()
+G.add_edges_from([
+    ("Segment", "Campaign"),
+    ("Segment", "Conversion"),
+    ("Campaign", "Conversion"),
+])
 
-dag <- dagitty('dag {
-  Segment  [pos="0,1"]
-  Campaign [pos="-1,0"]
-  Conversion [pos="1,0"]
+pos = {"Segment": (0, 1), "Campaign": (-1, 0), "Conversion": (1, 0)}
 
-  Segment  -> Campaign
-  Segment  -> Conversion
-  Campaign -> Conversion
-}')
+fig, ax = plt.subplots(figsize=(7, 4), facecolor="#0f1117")
+ax.set_facecolor("#0f1117")
+ax.axis("off")
 
-ggdag(dag, layout = "auto", text_size = 3.8) +
-  theme_dag_blank() +
-  theme(
-    plot.background  = element_rect(fill = "#0f1117", colour = NA),
-    panel.background = element_rect(fill = "#1e2d3d", colour = NA)
-  ) +
-  geom_dag_edges(edge_colour = "#5a8aaa", edge_width = 0.8) +
-  geom_dag_node(colour = "#3a5068", fill = "#1e2d3d", size = 16) +
-  geom_dag_text(colour = "#d0dce8", size = 3.8) +
-  labs(title   = "Segment confounds Campaign → Conversion",
-       caption = "Arrow from Segment to Campaign = confounder")
+# Separate confounder edges from causal edge
+confounder_edges = [("Segment", "Campaign"), ("Segment", "Conversion")]
+causal_edges     = [("Campaign", "Conversion")]
+
+nx.draw_networkx_edges(G, pos, edgelist=confounder_edges,
+                       edge_color="#e07070", width=2.0,
+                       arrows=True, arrowsize=20,
+                       connectionstyle="arc3,rad=0.1", ax=ax)
+nx.draw_networkx_edges(G, pos, edgelist=causal_edges,
+                       edge_color="#7ecba1", width=2.0,
+                       arrows=True, arrowsize=20,
+                       connectionstyle="arc3,rad=0.1", ax=ax)
+nx.draw_networkx_nodes(G, pos, node_color="#1e2d3d",
+                       edgecolors="#3a5068", node_size=3000,
+                       linewidths=1.5, ax=ax)
+nx.draw_networkx_labels(G, pos, font_color="#d0dce8",
+                        font_size=11, font_family="sans-serif", ax=ax)
+
+ax.set_title("Segment confounds Campaign → Conversion",
+             color="#d0dce8", fontsize=12, pad=12)
+
+legend_elements = [
+    plt.Line2D([0], [0], color="#e07070", linewidth=2, label="Confounder path"),
+    plt.Line2D([0], [0], color="#7ecba1", linewidth=2, label="Causal path"),
+]
+ax.legend(handles=legend_elements, facecolor="#1e2d3d",
+          labelcolor="#d0dce8", edgecolor="#3a5068", loc="lower center")
+
+plt.tight_layout()
+plt.show()
 ```
 
 The backdoor path is `Campaign ← Segment → Conversion`. As long as that path is open — i.e. as long as we do not condition on Segment — the raw comparison between campaigns is contaminated.

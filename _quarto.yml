@@ -3,7 +3,7 @@ project:
   output-dir: _output
 
 execute:
-  python: .venv/bin/python
+  # python: .venv/bin/python
   freeze: false
 
 format:
