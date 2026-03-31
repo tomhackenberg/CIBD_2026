@@ -200,7 +200,36 @@ The paradox has a clean causal explanation. Customer segment drives *both* which
 
 We can draw this precisely. Let's switch to R.
 
+```{r}
+#| label: dag-r
+#| fig-cap: "DAG — customer segment confounds the campaign–conversion relationship"
 
+library(dagitty)
+library(ggdag)
+library(ggplot2)
+
+dag <- dagitty('dag {
+  Segment  [pos="0,1"]
+  Campaign [pos="-1,0"]
+  Conversion [pos="1,0"]
+
+  Segment  -> Campaign
+  Segment  -> Conversion
+  Campaign -> Conversion
+}')
+
+ggdag(dag, layout = "auto", text_size = 3.8) +
+  theme_dag_blank() +
+  theme(
+    plot.background  = element_rect(fill = "#0f1117", colour = NA),
+    panel.background = element_rect(fill = "#1e2d3d", colour = NA)
+  ) +
+  geom_dag_edges(edge_colour = "#5a8aaa", edge_width = 0.8) +
+  geom_dag_node(colour = "#3a5068", fill = "#1e2d3d", size = 16) +
+  geom_dag_text(colour = "#d0dce8", size = 3.8) +
+  labs(title   = "Segment confounds Campaign → Conversion",
+       caption = "Arrow from Segment to Campaign = confounder")
+```
 
 The backdoor path is `Campaign ← Segment → Conversion`. As long as that path is open — i.e. as long as we do not condition on Segment — the raw comparison between campaigns is contaminated.
 
