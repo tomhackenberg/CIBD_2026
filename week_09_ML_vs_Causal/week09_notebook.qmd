@@ -383,9 +383,9 @@ The naïve OLS number ($\hat{\tau} \approx$ `{python} round(tau_naive, 2)`) look
 Week 11 will show you exactly *what* OLS does when it "controls for" a confounder — and where that breaks down. Week 12 will show you how to fix it.
 
 ::: {.callout-tip}
-**If you want to get ahead:** the key question to hold in your head going into Week 11 is — *what exactly is the OLS estimator doing when it includes W as a control?* The Frisch-Waugh-Lovell theorem gives the precise answer. See if you can find a statement of it before the lecture.
+**If you want to get ahead:** Before we mathematically define what OLS is doing with the Frisch-Waugh-Lovell theorem in Week 11, check out the **Week 10 Easter Break Notebook**. It will show you exactly why we cannot just throw Machine Learning (like LASSO) at this problem and call it a day.
 :::
 
 ---
 
-*Slides and the Week 11 notebook will be posted to GitHub after class.*
+*Slides and the Week 10 notebook will be posted to GitHub.*

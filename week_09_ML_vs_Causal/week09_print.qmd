@@ -464,14 +464,16 @@ cf <- causal_forest(X, Y, W)
 
 ## For Next Time
 
+**Week 9 — Optional Notebook 1 (Available Now)**
+* Simpson's Paradox from scratch.
+* Fit Naïve OLS vs. Controlled OLS on synthetic data to see confounding in action.
+
+**Week 10 (Easter Break) — Optional Notebook 2**
+* Fit LASSO on high-dimensional e-commerce data.
+* Watch the regularisation penalty shrink the causal treatment coefficient.
+* Not assessed. Purely for intuition before we fix it.
+
 **Week 11 — Frisch-Waugh-Lovell Theorem**
-
-*What does "controlling for $W$" actually mean algebraically?*
+* What does "controlling for $W$" actually mean algebraically?
 * Revise OLS in matrix form: $\hat{\beta} = (X^\top X)^{-1} X^\top Y$
-* Think about what "residualising" a variable means geometrically
-
-**Optional coding notebook (this week)**
-
-* Fit LASSO on e-commerce data — watch the treatment coefficient shrink
-* Compare OLS vs. LASSO estimates
-* Not assessed. Purely for intuition.
+* Think about what "residualising" a variable means geometrically.
