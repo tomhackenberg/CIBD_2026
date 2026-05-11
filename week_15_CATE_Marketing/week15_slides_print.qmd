@@ -1,0 +1,402 @@
+---
+title: "Heterogeneous Treatment Effects & Marketing Optimisation"
+subtitle: "Week 15 — From Average Effects to Personalised Decisions"
+author: "Causal Inference for Business Decisions"
+date: "11-05-2026"
+format:
+  revealjs:
+    theme: default
+    slide-number: true
+    width: 1280
+    height: 720
+    echo: true
+    warning: false
+    message: false
+execute:
+  eval: false
+---
+
+## The Course Arc {.smaller}
+
+| Week | Tool | What it answers |
+|------|------|----------------|
+| 9 | ML basics + prediction/causation gap | Why can't I just use ML? |
+| 11 | FWL Theorem | What does "controlling for" mean mathematically? |
+| 12 | Double ML — ATE | How do I get a valid causal estimate at scale? |
+| **15** | **Linear DML for CATE · Causal Forests** | **Who responds, and by how much?** |
+| **15** | **Policy Trees + Qini** | **How do I turn estimates into decisions?** |
+
+**The through-line**: isolate exogenous variation in treatment → use it for causal estimation. FWL named it. DML operationalised it. CATE personalises it. Policy trees deploy it.
+
+---
+
+# Part 1: From ATE to CATE
+*Why averages aren't enough*
+
+---
+
+## The Problem with Averages {.smaller}
+
+**Scenario**: a discount campaign with ATE = £5 revenue lift
+
+| Segment | Effect | Interpretation |
+|---------|--------|----------------|
+| Loyal customers | £0 | Would have bought anyway |
+| Price-sensitive new | £20 | Highly responsive |
+| Deal-seekers | −£10 | Cannibalise margin |
+
+A manager acting on the ATE alone sends the same discount to **everyone**: gives money away to loyals, fuels deal-seeker behaviour, and misses the high-responders who actually need the nudge.
+
+::: {.callout-note}
+**The ATE is correct on average but wrong for everyone.** The business question is rarely "what is the average effect?" — it's *which customer segments do we identify and prioritise* for treatment?
+:::
+
+---
+
+## The CATE Definition {.smaller}
+
+$$\tau(x) = \mathbb{E}[Y(1) - Y(0) \mid X = x]$$
+
+- The **average treatment effect within the subpopulation defined by** $X = x$
+- A **function**, not a number — one value per individual (or per segment)
+- **Bridge to ATE**: $\text{ATE} = \mathbb{E}_X[\tau(X)]$ — if $\tau(\cdot)$ is flat, the two agree; if it varies, the ATE conceals real heterogeneity
+
+---
+
+## The CATE Definition (.cont) {.smaller}
+
+**The DML structural model extends naturally:**
+
+$$Y_i = m(X_i) + \tau(X_i) \cdot T_i + \epsilon_i$$
+
+Now $\tau(\cdot)$ is a *function* to be learned — not a scalar to be estimated.
+
+**Identifying assumptions:**
+
+1. **Unconfoundedness**: $Y(0), Y(1) \perp T \mid X$ — satisfied if $X$ captures all confounders
+2. **Overlap — now per point**: at every $x$ where we want $\hat{\tau}(x)$, we need both treated and untreated units with covariate values close to $x$
+
+---
+
+## Why CATE is Harder than ATE {.smaller}
+
+$\hat{\tau}(x)$ is a **local estimate** — it uses the data near $x$, not the full sample.
+
+::: {.callout-note}
+Each value of $\hat{\tau}(x)$ effectively relies on a **smaller, local subsample**. Fewer points per estimate → **higher variance per point**. The ATE from $n=600$ is one number using all 600 points; the CATE function tries to estimate one number per individual, each from a small *neighbourhood* of the 600.
+:::
+
+**Three consequences**:
+
+1. **Noise**: individual $\hat{\tau}(x)$ estimates can be very noisy even when the average is well-estimated
+2. **Per-point overlap**: sparse regions of covariate space cannot be estimated reliably
+3. **Evaluation**: standard ML metrics (RMSE, $R^2$) are unavailable — the truth $\tau(x)$ is never observed
+
+The methods we'll see today differ mainly in **how cleverly they pool information across nearby points** to control that noise.
+
+---
+
+## Three Approaches to CATE Estimation {.smaller}
+
+| Approach | Where the flexibility sits | Best when |
+|----------|---------------------------|-----------|
+| **Linear DML for CATE** | Same residualised regression + interactions | $\tau(x)$ approximately linear in $x$ |
+| **Meta-learners** (S, T, X) | Off-the-shelf ML on $(Y,T,X)$ | Want existing ML pipeline; less rigorous |
+| **Causal Forest DML** | Splits maximise heterogeneity | $\tau(\cdot)$ shape unknown; want CIs |
+
+All three rest on the same DML residualisation as Week 12. They differ in **what you do with the residuals in Step 3**.
+
+::: {.callout-note}
+We'll start with the simplest case where the structural form of $\tau(\cdot)$ is assumed linear — and only then introduce the pseudo-outcome machinery that lets any ML model fit $\tau(\cdot)$ flexibly.
+:::
+
+---
+
+# Part 2: Linear DML for CATE
+*The simplest extension of Week 12*
+
+---
+
+## Linear DML — The Idea {.smaller}
+
+**Week 12 in one line.** After cross-fitted residualisation, OLS of $\tilde{Y}$ on $\tilde{T}$ gives the ATE.
+
+**Week 15 extension.** Same residualisation. To allow the effect to **vary linearly with covariates**, add **treatment-by-covariate interaction terms** to the residualised regression:
+
+$$\tilde{Y}_i = \theta_0 \tilde{T}_i + \sum_{k} \theta_k \big(\tilde{T}_i \cdot X_{i,k}\big) + \varepsilon_i$$
+
+The fitted coefficients give a **linear CATE function**: $\hat{\tau}(x) = \hat{\theta}_0 + \hat{\theta}_1 x_1 + \hat{\theta}_2 x_2 + \cdots$
+
+::: {.callout-note}
+*Nothing* changes in the residualisation. The nuisance models $m(X)=\mathbb{E}[T\mid X]$ and $g(X)=\mathbb{E}[Y\mid X]$ are still ML, still cross-fitted. The only change is the **final regression** — interactions of the residualised treatment with covariates instead of $\tilde{T}$ alone.
+:::
+
+::: {.callout-warning}
+**Limitation**: $\tau(x)$ must be (approximately) linear in the covariates you interact with. If the truth is non-linear, this approach is biased — but gives valid inference *for the linear projection*.
+:::
+
+---
+
+## Linear DML — Code & Interpretation {.smaller}
+
+```python
+from econml.dml import LinearDML
+from sklearn.ensemble import RandomForestRegressor
+
+dml = LinearDML(
+    model_y=RandomForestRegressor(),
+    model_t=RandomForestRegressor(),
+    cv=5, random_state=42
+)
+dml.fit(Y, T, X=X_features)
+print(dml.summary())
+
+tau_hat = dml.effect(X_features)
+lb, ub  = dml.effect_interval(X_features, alpha=0.05)
+```
+
+| Coefficient | Interpretation |
+|-------------|----------------|
+| $\hat{\theta}_0 = 2.50$ | Effect at $X=0$ baseline |
+| $\hat{\theta}_{\text{tenure}} = -0.14$ | Each additional year of tenure reduces ad responsiveness by £0.14k |
+
+::: {.callout-note}
+This recovers the **true** $\tau(\text{tenure}) = 2.5 - 0.14\cdot\text{tenure}$ from the Week 12 DGP — with valid confidence intervals. Linear DML is **the right method when you have a hypothesis about the form of heterogeneity** and want clean inference on it.
+:::
+
+---
+
+# Part 3: Going Nonparametric
+*When you don't want to assume the shape of $\tau(\cdot)$*
+
+---
+
+## Beyond Linear — the Pseudo-Outcome {.smaller}
+
+Linear DML assumed $\tau(x)$ is linear. To let *any* ML model fit $\tau(\cdot)$, rewrite the causal loss:
+
+$$\mathcal{L}(\tau) = \frac{1}{N}\sum_i \big(\tilde{Y}_i - \tau(X_i)\tilde{T}_i\big)^2 = \frac{1}{N}\sum_i \tilde{T}_i^2 \left(\frac{\tilde{Y}_i}{\tilde{T}_i} - \tau(X_i)\right)^2$$
+
+**Define** the pseudo-outcome $z_i = \tilde{Y}_i / \tilde{T}_i$ and sample weight $w_i = \tilde{T}_i^2$:
+
+$$\mathcal{L}(\tau) = \frac{1}{N}\sum_i w_i\big(z_i - \tau(X_i)\big)^2$$
+
+This is now **weighted supervised regression** — predict $z_i$ from $X_i$ with weights $w_i$. Any ML model can estimate $\tau(\cdot)$.
+
+---
+
+## Meta-Learners — S, T, X {.smaller}
+
+| Learner | Idea | Best for |
+|---------|------|----------|
+| **S-Learner** | One model on $(Y, T, X)$. $\hat{\tau}(x) = \hat{\mu}(1,x) - \hat{\mu}(0,x)$ | Balanced data; small $p$ |
+| **T-Learner** | Separate models for treated and control. Difference of predictions. | Balanced observational |
+| **X-Learner** | T-learner + cross-imputation, weighted by propensity | Imbalanced groups (e.g. 80/20) |
+
+---
+
+## Meta-Learners — S, T, X (.cont) {.smaller}
+
+```python
+from econml.metalearners import XLearner
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+
+xl = XLearner(
+    models=GradientBoostingRegressor(),
+    propensity_model=RandomForestRegressor()
+)
+xl.fit(Y, T, X=X_features)
+tau_xl = xl.effect(X_features)
+```
+
+::: {.callout-warning}
+**Risk for all meta-learners**: no built-in confidence intervals. They give you a CATE estimate but not honest uncertainty around it.
+:::
+
+---
+
+## Causal Forest DML {.smaller}
+
+**How it works**
+
+- Builds many trees, but each split maximises **heterogeneity in treatment effects** — fits the weighted MSE on $z_i$
+- **Honest estimation**: separate subsamples for splitting and estimation within each leaf — reduces overfitting bias
+- **Pointwise confidence intervals**: valid CIs for $\hat{\tau}(x)$ at each $x$ — the main advantage over meta-learners
+
+```python
+from econml.dml import CausalForestDML
+from sklearn.ensemble import GradientBoostingRegressor
+
+cf = CausalForestDML(
+    model_y=GradientBoostingRegressor(),
+    model_t=GradientBoostingRegressor(),
+    n_estimators=200, min_samples_leaf=10,
+    cv=5, random_state=42
+)
+cf.fit(Y, T, X=X_features)
+
+tau_hat = cf.effect(X_features)
+lb, ub  = cf.effect_interval(X_features, alpha=0.05)
+```
+
+---
+
+# Part 4: Evaluating CATE Models
+*The counterfactual evaluation problem*
+
+---
+
+## You Cannot Use Standard ML Metrics {.smaller}
+
+::: {.callout-warning}
+You can never compute $\hat{\tau}(x) - \tau(x)$ because the true $\tau(x)$ is never observed. RMSE, $R^2$, MAE — all undefined for CATE.
+:::
+
+**GATES (Sorted Group ATEs)**
+
+1. Sort by $\hat{\tau}(x)$ high → low and group into deciles
+2. Estimate ATE within each decile (DML or IPW)
+3. A good model: top decile ATE >> bottom decile ATE — reveals: *is the ranking meaningful?*
+
+---
+
+## You Cannot Use Standard ML Metrics (.cont) {.smaller}
+
+**Qini Curve / AUUC**
+
+- X-axis: proportion of population treated, sorted by $\hat{\tau}$ high → low; Y-axis: cumulative incremental outcome
+- Compare to random targeting (flat line); AUUC: Area Under Uplift Curve — higher = better
+- Reveals: *how much value does prioritisation add?*
+
+**AUTOC — a single number**
+
+$$\text{AUTOC} = \int_0^1 \big[\text{ATE}(\text{top } q\%) - \text{overall ATE}\big]\, dq$$
+
+Has a valid test statistic — can test whether heterogeneity is statistically significant. Implemented in `econml.score.RScorer`.
+
+---
+
+## AUTOC — Code 
+
+```python
+from econml.score import RScorer
+
+scorer = RScorer(
+    model_y=GradientBoostingRegressor(),
+    model_t=GradientBoostingRegressor(),
+    cv=5, random_state=42
+)
+scorer.fit(Y, T, X=X_features)
+rscore = scorer.score(cf)
+print(f"R-score: {rscore:.4f}")
+```
+
+---
+
+# Part 5: From CATEs to Business Decisions
+*Estimates → policies → ROI*
+
+---
+
+## The Targeting Rule {.smaller}
+
+**Treat customer $x$ if the estimated effect exceeds the cost:**
+
+$$\pi(x) = \mathbf{1}\big[\hat{\tau}(x) > c\big]$$
+
+where $c$ = per-customer cost of treatment.
+
+| $\hat{\tau}(x)$ vs $c$ | Action |
+|---|---|
+| $\hat{\tau}(x) > c$ | Treat — positive ROI |
+| $0 < \hat{\tau}(x) < c$ | Don't treat — too costly |
+| $\hat{\tau}(x) < 0$ | **Keep on status quo** — treatment hurts |
+
+::: {.callout-warning}
+**Common trap: targeting on outcome, not effect.** "Send the offer to customers most likely to buy" — but customers with **high baseline outcomes are not necessarily those most affected by the treatment**. Loyal customers buy a lot regardless; the marginal lift from a discount may be zero. Predict the *effect*, not the *outcome*.
+:::
+
+---
+
+## Policy Trees — From 1000 Scores to 3 Rules {.smaller}
+
+A causal forest gives you 1000 individual $\hat{\tau}(x)$ scores. A policy tree gives you **3 rules**.
+
+```python
+from econml.policy import PolicyTree
+
+cost = 5.0  # £5 discount
+
+policy = PolicyTree(max_depth=2)
+policy.fit(X_features, tau_hat - cost)
+policy.plot()
+```
+
+Output a marketing operations team can deploy directly:
+
+> *"Target customers with tenure < 4 years AND brand_awareness > 0."*
+
+::: {.callout-note}
+**Why fit on $\hat{\tau}(x) - c$?** The tree maximises *expected net benefit*, not just heterogeneity. A subgroup with high $\hat{\tau}$ but $\hat{\tau} < c$ shouldn't be targeted — the tree learns this automatically. A depth-2 tree loses some precision relative to per-individual scoring; it gains directness, auditability, and CRM deployability without a model serving layer.
+:::
+
+---
+
+## Choosing the Right Format {.smaller}
+
+| Format | Accuracy | Implementability |
+|--------|----------|--------------------|
+| Causal forest scores | ★★★ | ★☆☆ |
+| Decile rules (GATES) | ★★☆ | ★★☆ |
+| Policy tree (depth 2) | ★★☆ | ★★★ |
+| Qini curve | summary | strategic |
+
+**The right format depends on who acts on the output**: data team → forest scores + CIs; marketing ops → policy tree; C-suite → Qini curve showing the value of personalisation. Different stakeholders, different formats, **same underlying $\hat{\tau}(\cdot)$**.
+
+::: {.callout-note}
+**Phrasing CATE for a non-technical audience**
+
+Not: *"the CATE function shows tenure-dependent heterogeneity with a slope of −0.14"*
+
+Instead: *"On average we lift sales by £1.82k per £1k spent. But the lift is concentrated in newer customers — about £2.50k for someone in their first year, falling to £1.10k for a 10-year customer. Targeting only the newer half captures most of the value at half the cost."*
+
+The numbers are the same. The framing decides whether the recommendation gets acted on.
+:::
+
+---
+
+## The Business Case for CATE {.smaller}
+
+**Treat-all baseline**: Cost £500K → Revenue lift £600K → Net **+£100K**
+
+**CATE-targeted (top 40%)**: Cost £200K → Revenue lift £420K → Net **+£220K**
+
+**Same intervention. 2.2× ROI improvement.**
+
+::: {.callout-note}
+**Where the gain comes from**: the CATE-targeted policy does the *same thing* as treat-all for the customers it treats. The improvement comes entirely from **not treating** the customers for whom $\hat{\tau}(x) < c$. CATE is commercially valuable because the action is *more selective*, not more sophisticated — spending less to get more by prioritising segments where the treatment is most effective.
+:::
+
+---
+
+## Week 15 Summary {.smaller}
+
+**What you now know**
+
+- CATE = treatment effect within the subpopulation defined by $X = x$; $\text{ATE} = \mathbb{E}_X[\tau(X)]$
+- CATE estimates are noisier than ATE — local subsamples, per-point overlap
+- Three estimation approaches: Linear DML with interactions · Meta-learners (S, T, X) · Causal Forest DML (with CIs)
+- Why standard ML metrics don't apply — GATES, Qini, AUTOC instead
+- Targeting rule: $\pi(x) = \mathbf{1}[\hat{\tau}(x) > c]$; Policy tree: 1000 scores → 3 rules a CRM can run
+
+**Where this leads**
+
+- Instrumental variables + DML (DMLIV) for endogenous treatments
+- DML-DiD for panel data with staggered rollouts
+- Off-policy evaluation for A/B test analysis
+- Reinforcement learning for dynamic treatment policies
+- Synthetic control for aggregate-level inference
+
+::: {.callout-note}
+**Final takeaway**: every method we covered in the last four lectures does one thing — isolates exogenous variation in treatment and uses it to estimate a causal effect. FWL named it. DML operationalised it. CATE personalised it. Policy trees help us deploy it.
+:::
