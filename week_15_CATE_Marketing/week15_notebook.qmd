@@ -1,0 +1,699 @@
+---
+title: "Week 15 — Heterogeneous Treatment Effects"
+subtitle: "From ATE to CATE on the Week 12 DGP · Instructor Version"
+author: "Tom Hackenberg · Block 2"
+date: "9 May 2025"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    code-fold: false
+    code-tools: true
+    highlight-style: github
+    fig-align: center
+    embed-resources: true
+execute:
+  eval: true
+  echo: true
+  warning: false
+  message: false
+  python: .venv/bin/python
+---
+
+> **Instructor version.** Same structure as the Week 12 notebook. The student version on GitHub has interpretation cells replaced with prompts. We walk through the projected version; you can follow on the GitHub version.
+
+---
+
+## Setup
+
+```{python}
+#| label: setup
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+
+from sklearn.ensemble import (RandomForestRegressor, RandomForestClassifier,
+                              GradientBoostingRegressor)
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import cross_val_predict, KFold
+from scipy.stats import spearmanr
+from scipy.integrate import trapezoid
+
+from econml.dml import LinearDML, CausalForestDML
+from econml.metalearners import TLearner, SLearner, XLearner
+from econml.policy import PolicyTree
+
+plt.rcParams.update({
+    "figure.facecolor": "white",
+    "axes.facecolor":   "#f8fafc",
+    "axes.spines.top":  False,
+    "axes.spines.right":False,
+    "font.size": 12,
+})
+
+# Palette consistent with Week 12
+COL_TRUE    = "#16a34a"
+COL_LINDML  = "#f59e0b"
+COL_CF      = "#2563eb"
+COL_NAIVE   = "#dc2626"
+COL_NEUTRAL = "#64748b"
+```
+
+---
+
+## 1 · Recap from Week 12
+
+Last week we estimated the **average** effect of ad spend on sales: £1.82k per £1k spent, recovered cleanly by DML. We closed with a teaser — *new customers respond about twice as strongly as long-tenured ones*. The ATE conceals this. Today we estimate the **function** $\tau(x)$ that describes how the effect varies, and turn it into a targeting rule a marketing team can act on.
+
+We use the same data-generating process, with no changes — same six controls, same outcome model, same heterogeneity in `customer_tenure`. The whole point of Week 15 is to recover something we already knew was there.
+
+```{python}
+#| label: dgp
+rng = np.random.default_rng(42)
+n   = 600
+
+brand_awareness  = rng.normal(0, 1, n)
+competitor_spend = rng.normal(0, 1, n)
+seasonality      = np.sin(2 * np.pi * rng.uniform(0, 1, n))
+customer_tenure  = rng.uniform(0, 10, n)
+channel_mix      = rng.beta(2, 2, n)
+region           = rng.choice([0.0, 0.3, -0.2], n)
+
+X = np.column_stack([brand_awareness, competitor_spend, seasonality,
+                     customer_tenure, channel_mix, region])
+X_cols = ["brand_awareness","competitor_spend","seasonality",
+          "customer_tenure","channel_mix","region"]
+
+# Treatment: ad spend (£000s) — non-linear in brand awareness
+T = (2.0 * brand_awareness
+   + 0.8 * brand_awareness**2
+   + 1.0 * seasonality
+   + region
+   + rng.normal(0, 1, n))
+
+# True heterogeneous effect: tau(tenure) = 2.5 - 0.14 * tenure
+tau_i    = 2.5 - 0.14 * customer_tenure
+tau_true = tau_i.mean()
+
+# Outcome: sales (£000s)
+Y = (tau_i * T
+   + 3.0 * brand_awareness
+   + 1.5 * brand_awareness**2
+   - 1.0 * competitor_spend
+   + 2.0 * seasonality
+   + 0.5 * customer_tenure
+   + region
+   + rng.normal(0, 1.5, n))
+
+print(f"Observations: {n}")
+print(f"True ATE:     £{tau_true:.3f}k per £1k ad spend")
+print(f"True CATE:    £{tau_i.min():.2f}k (10-year customer) → £{tau_i.max():.2f}k (new customer)")
+```
+
+::: {.callout-note}
+**The truth, stated precisely.** The DGP defines $\tau(\text{tenure}) = 2.5 - 0.14\cdot\text{tenure}$. A new customer's response to £1k of ad spend is £2.50k in sales; a 10-year customer's response is £1.10k. The ATE of **£1.82k** is the average of these — correct on average, but very wrong for either extreme.
+
+This is the function we need to estimate, ideally without knowing in advance that the heterogeneity lies in `customer_tenure`.
+:::
+
+---
+
+## 2 · The Heterogeneity We're Trying to Recover
+
+A picture before any modelling.
+
+```{python}
+#| label: truth-picture
+#| fig-height: 4
+#| fig-width: 11
+fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+# Left: scatter of true tau by tenure
+ax = axes[0]
+ax.scatter(customer_tenure, tau_i, alpha=0.4, s=20, color=COL_TRUE)
+tenure_grid = np.linspace(0, 10, 200)
+ax.plot(tenure_grid, 2.5 - 0.14 * tenure_grid, color="#15803d", lw=2.5,
+        label=r"$\tau(\text{tenure}) = 2.5 - 0.14 \cdot \text{tenure}$")
+ax.axhline(tau_true, color=COL_NEUTRAL, linestyle="--", lw=1.5,
+           label=f"ATE = £{tau_true:.2f}k")
+ax.set_xlabel("Customer tenure (years)")
+ax.set_ylabel(r"True $\tau(x)$  (£k per £1k ad spend)")
+ax.set_title("The truth, by tenure", fontweight="bold")
+ax.legend(fontsize=10)
+
+# Right: distribution
+ax = axes[1]
+ax.hist(tau_i, bins=40, color=COL_TRUE, alpha=0.7, edgecolor="white")
+ax.axvline(tau_true, color=COL_NEUTRAL, linestyle="--", lw=1.5,
+           label=f"ATE = £{tau_true:.2f}k")
+ax.set_xlabel(r"True $\tau(x)$ (£k)")
+ax.set_ylabel("Customers")
+ax.set_title("Distribution of true CATE across customers", fontweight="bold")
+ax.legend(fontsize=10)
+
+plt.suptitle("If we could see the truth", fontsize=13, fontstyle="italic")
+plt.tight_layout()
+plt.show()
+```
+
+::: {.callout-note}
+**Reading these plots.** Left: the true effect declines linearly with tenure, from £2.50k at zero years to £1.10k at ten. Right: the population of true CATEs spans a meaningful range — about £1.40k from end to end, against an ATE of £1.82k. A targeting policy that ignores this heterogeneity treats a 10-year customer the same as a brand-new one, even though the latter is more than twice as responsive.
+
+In practice we never see these plots — they require knowing $\tau_i$, which is unobservable. Our job is to recover the left panel using only $(Y, T, X)$.
+:::
+
+---
+
+## 3 · Linear DML for CATE — by hand
+
+The simplest approach: the **same DML residualisation as Week 12**, but in the final regression we add **treatment-by-covariate interaction terms**. The fitted coefficients give us a linear CATE function with valid confidence intervals — directly, no extra machinery.
+
+### 3a · Cross-fitted residualisation
+
+Replicating Week 12, but using `cross_val_predict` instead of a hand-rolled KFold loop. The result is the same: every residual is generated by a model that did not see that observation. The function-call form is more concise.
+
+```{python}
+#| label: residualise
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
+
+rf_y = RandomForestRegressor(n_estimators=200, max_depth=5, random_state=42)
+rf_t = RandomForestRegressor(n_estimators=200, max_depth=5, random_state=42)
+
+Y_hat = cross_val_predict(rf_y, X, Y, cv=kf)
+T_hat = cross_val_predict(rf_t, X, T, cv=kf)
+
+Y_res = Y - Y_hat
+T_res = T - T_hat
+
+print(f"Y residual variance / total: {np.var(Y_res)/np.var(Y):.3f}")
+print(f"T residual variance / total: {np.var(T_res)/np.var(T):.3f}")
+print(f"Plain DML ATE (sanity check): £{(T_res @ Y_res) / (T_res @ T_res):.3f}k  "
+      f"(Week 12 reported £1.90k)")
+```
+
+::: {.callout-note}
+**Sanity check.** The plain DML ATE — running OLS of $\tilde{Y}$ on $\tilde{T}$ alone — recovers **£1.90k**, identical to what we got in Week 12. That's not a coincidence: same DGP, same nuisance learners, same five-fold cross-fitting. We are about to extend this regression, not replace it.
+:::
+
+### 3b · The interaction regression
+
+Build a design matrix with $\tilde{T}$ and $\tilde{T}\cdot X_k$ for each covariate, then run OLS on the residualised outcome.
+
+```{python}
+#| label: linear-dml-manual
+# Centre X so theta_0 reads as the effect at average X (the ATE)
+X_centred = X - X.mean(axis=0)
+
+# Design: T_res, T_res * (X_k - X_k_bar) for each k
+T_design = np.column_stack(
+    [T_res] + [T_res * X_centred[:, k] for k in range(X.shape[1])]
+)
+
+# OLS on residualised outcome — no intercept (residuals are mean-zero)
+ols_int = sm.OLS(Y_res, T_design).fit()
+
+coef_table = pd.DataFrame({
+    "term":     ["theta_0 (T_res)"] + [f"theta_{c}" for c in X_cols],
+    "estimate": ols_int.params,
+    "std_err":  ols_int.bse,
+    "p_value":  ols_int.pvalues,
+}).round(4)
+print(coef_table.to_string(index=False))
+```
+
+::: {.callout-important}
+**What this output tells us.**
+
+The headline coefficient is on `customer_tenure`: **−0.141** with a standard error of 0.029 and a p-value below 0.001. The 95% confidence interval is roughly [−0.20, −0.08]. The DGP's true value is **−0.14**. We have recovered the heterogeneity slope to within sampling noise, and we have a valid confidence interval on it.
+
+Every other interaction coefficient is small in magnitude and statistically indistinguishable from zero. That is also what the DGP says — only `customer_tenure` drives the heterogeneity.
+
+The intercept on $\tilde{T}$ is **£1.89k**, which is the effect at the *mean* of $X$ (because we centred). It matches the ATE we recovered in 3a.
+
+This is the cleanest possible CATE estimator when the heterogeneity is approximately linear in known covariates — and it gives us valid frequentist inference on every coefficient.
+:::
+
+### 3c · Visualising the recovered function
+
+```{python}
+#| label: linear-dml-plot
+#| fig-height: 4
+#| fig-width: 9
+theta = ols_int.params
+tau_hat_lin = theta[0] + (X_centred * theta[1:]).sum(axis=1)
+
+fig, ax = plt.subplots(figsize=(9, 4))
+ax.scatter(customer_tenure, tau_hat_lin, alpha=0.35, s=18,
+           color=COL_LINDML, label="Linear-DML estimated CATE")
+ax.plot(tenure_grid, 2.5 - 0.14 * tenure_grid, color="#15803d", lw=2.5,
+        label="True CATE function")
+ax.axhline(tau_true, color=COL_NEUTRAL, linestyle="--", lw=1.5,
+           label=f"ATE = £{tau_true:.2f}k")
+ax.set_xlabel("Customer tenure (years)")
+ax.set_ylabel(r"$\hat{\tau}(x)$  (£k per £1k ad spend)")
+ax.set_title("Linear DML recovers the truth — slope and level both right",
+             fontweight="bold")
+ax.legend(fontsize=10)
+plt.tight_layout()
+plt.show()
+```
+
+::: {.callout-note}
+**Reading this plot.** Each amber dot is one customer's estimated CATE. Tenure mostly determines the dot's location; the small vertical scatter at each tenure is the (small, noisy) contribution of the other interactions. The amber cloud sits essentially on the green line — the linear projection of $\tau(\cdot)$ has been recovered, and the few percent of departure is sampling noise on a sample of $n=600$.
+
+The headline finding for the marketing team: **each additional year of customer tenure reduces ad responsiveness by £0.14k per £1k spent**, with a 95% CI of roughly £0.08k to £0.20k.
+:::
+
+### 3d · The same thing, via `econml`
+
+```{python}
+#| label: linear-dml-econml
+dml = LinearDML(
+    model_y=RandomForestRegressor(n_estimators=200, max_depth=5, random_state=42),
+    model_t=RandomForestRegressor(n_estimators=200, max_depth=5, random_state=42),
+    discrete_treatment=False,
+    cv=5,
+    random_state=42,
+)
+dml.fit(Y, T, X=X)
+
+print(dml.summary(feature_names=X_cols))
+
+tau_lindml = dml.effect(X)
+lb_lindml, ub_lindml = dml.effect_interval(X, alpha=0.05)
+print(f"\nMean estimated CATE:  £{tau_lindml.mean():.3f}k  (true: £{tau_true:.3f}k)")
+print(f"Range:                £{tau_lindml.min():.2f}k → £{tau_lindml.max():.2f}k")
+print(f"Mean 95% CI width:    £{(ub_lindml - lb_lindml).mean():.3f}k")
+```
+
+::: {.callout-note}
+**`econml` and the manual implementation agree by design.** Both fit the same residualised regression with treatment-by-covariate interactions; `econml` adds nicer reporting (the coefficient table above), proper inference for `effect_interval(X)`, and consistent return shapes when integrated with downstream `econml` tools.
+
+Use the manual version when you want to *see* what is happening; use `econml.dml.LinearDML` when you want to integrate cleanly with policy trees and scoring.
+
+Note the `cate_intercept` of about £2.74k — that's the effect at $X = 0$ (so a hypothetical customer with `customer_tenure = 0` and zero on every other feature). It is not the ATE. The ATE in `econml` is `dml.ate(X)`, which averages the per-individual effects over the sample.
+:::
+
+---
+
+## 4 · Going Nonparametric — Causal Forest DML
+
+Linear DML works because the truth happens to be linear in `customer_tenure`. In practice we don't know this. **Causal Forest DML** discovers the heterogeneity structure without assuming a functional form, and gives valid pointwise confidence intervals at every $x$.
+
+```{python}
+#| label: causal-forest
+cf = CausalForestDML(
+    model_y=GradientBoostingRegressor(n_estimators=100, random_state=42),
+    model_t=GradientBoostingRegressor(n_estimators=100, random_state=42),
+    n_estimators=500,
+    min_samples_leaf=10,
+    cv=5,
+    random_state=42,
+    verbose=0,
+)
+cf.fit(Y, T, X=X)
+
+tau_cf = cf.effect(X).flatten()
+lb_cf, ub_cf = cf.effect_interval(X, alpha=0.05)
+lb_cf, ub_cf = lb_cf.flatten(), ub_cf.flatten()
+
+print(f"Mean CATE:        £{tau_cf.mean():.3f}k  (true: £{tau_true:.3f}k)")
+print(f"Range:            £{tau_cf.min():.2f}k → £{tau_cf.max():.2f}k")
+print(f"Std of CATE:      £{tau_cf.std():.3f}k  (true: £{tau_i.std():.3f}k)")
+print(f"Mean CI width:    £{(ub_cf - lb_cf).mean():.3f}k")
+print(f"Corr with truth:  {np.corrcoef(tau_cf, tau_i)[0,1]:.3f}")
+```
+
+```{python}
+#| label: cf-vs-truth
+#| fig-height: 4
+#| fig-width: 11
+fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+# Estimated by tenure
+ax = axes[0]
+ax.scatter(customer_tenure, tau_cf, alpha=0.35, s=18, color=COL_CF,
+           label="Causal Forest estimated CATE")
+ax.plot(tenure_grid, 2.5 - 0.14 * tenure_grid, color="#15803d", lw=2.5,
+        label="True CATE function")
+ax.axhline(tau_true, color=COL_NEUTRAL, linestyle="--", lw=1.5,
+           label=f"ATE = £{tau_true:.2f}k")
+ax.set_xlabel("Customer tenure (years)")
+ax.set_ylabel(r"$\hat{\tau}(x)$  (£k)")
+ax.set_title("Causal Forest by tenure", fontweight="bold")
+ax.legend(fontsize=10)
+
+# Estimated vs true scatter
+ax = axes[1]
+ax.scatter(tau_i, tau_cf, alpha=0.3, s=14, color=COL_CF)
+lo, hi = tau_i.min(), tau_i.max()
+ax.plot([lo, hi], [lo, hi], color="#dc2626", lw=2, linestyle="--",
+        label="Perfect recovery")
+ax.set_xlabel(r"True $\tau(x)$ (£k)")
+ax.set_ylabel(r"$\hat{\tau}(x)$ (£k)")
+ax.set_title("CF estimated vs true CATE", fontweight="bold")
+ax.legend(fontsize=10)
+
+plt.suptitle("Causal Forest DML — recovery quality", fontsize=13, fontstyle="italic")
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| label: cf-feature-importance
+#| fig-height: 3.5
+#| fig-width: 8
+fi = pd.DataFrame({"feature": X_cols, "importance": cf.feature_importances_})
+fi = fi.sort_values("importance")
+
+fig, ax = plt.subplots(figsize=(8, 3.5))
+ax.barh(fi["feature"], fi["importance"], color=COL_CF, alpha=0.85, edgecolor="white")
+ax.set_xlabel("Heterogeneity importance")
+ax.set_title("Which features drive the CATE?  (Causal Forest)", fontweight="bold")
+plt.tight_layout()
+plt.show()
+
+print("Feature importances (sorted):")
+print(fi.sort_values("importance", ascending=False).to_string(index=False))
+```
+
+::: {.callout-note}
+**What the forest tells us.** The mean CATE is **£1.86k** — close to the ATE. The estimated range, £1.20k to £2.34k, narrower than the truth (£1.10–£2.50) — the forest is conservative at the extremes, a normal feature of tree-based local averaging when the underlying signal is smooth.
+
+The feature-importance plot is unambiguous: `customer_tenure` is by a factor of about four the most important feature — the forest discovered the structure of the heterogeneity *without being told* that tenure was the relevant dimension. The smaller bars on the other features are not zero — tree-based methods tend to use marginal signal from all features, and with $n=600$ and five-fold cross-fitting the residuals contain enough noise for the splits to find some.
+
+**Pointwise confidence intervals** are the main thing causal forest gives us that meta-learners (next section) cannot. Each individual estimate comes with a £0.62k average 95%-CI width — wide enough to be honest about the local sample size, narrow enough to make decisions.
+:::
+
+::: {.callout-warning}
+**Linear DML beats Causal Forest here — but that's specific to this DGP.**
+
+On this dataset the truth is *literally* linear in tenure. Linear DML uses exactly the right model class, while Causal Forest pays a small flexibility tax for not knowing in advance. We will see this in the AUUC numbers in Section 6.
+
+The general lesson is the inverse of the slogan "always use the most flexible model": **method should match expected structure of heterogeneity**. If you have a hypothesis about which covariates drive heterogeneity and a reason to expect it to be smooth, linear DML is cleaner. If you don't, causal forest is the right default.
+:::
+
+---
+
+## 5 · Meta-Learners — for binary treatments
+
+Meta-learners (S, T, X) are the standard CATE estimators when the treatment is **binary** — typical of A/B tests and discount-vs-no-discount campaigns. Our treatment is continuous (ad spend in £000s), so to demonstrate them we binarise at the median: "high spend" vs "low spend." This is a different estimand from the £1k-per-unit effect we have been estimating, but the methods themselves are the point.
+
+```{python}
+#| label: meta-learners
+T_bin = (T > np.median(T)).astype(int)
+print(f"Binarising at median ad spend ({np.median(T):.2f}); "
+      f"{T_bin.mean():.1%} of customers above threshold")
+
+# T-learner
+t_learner = TLearner(models=GradientBoostingRegressor(n_estimators=100, random_state=42))
+t_learner.fit(Y, T_bin, X=X)
+tau_t = t_learner.effect(X).flatten()
+
+# S-learner
+s_learner = SLearner(overall_model=GradientBoostingRegressor(n_estimators=100, random_state=42))
+s_learner.fit(Y, T_bin, X=X)
+tau_s = s_learner.effect(X).flatten()
+
+# X-learner — propensity model is a CLASSIFIER (predict_proba required)
+x_learner = XLearner(
+    models=GradientBoostingRegressor(n_estimators=100, random_state=42),
+    propensity_model=RandomForestClassifier(n_estimators=100, random_state=42),
+)
+x_learner.fit(Y, T_bin, X=X)
+tau_x = x_learner.effect(X).flatten()
+
+summary = pd.DataFrame({
+    "Learner": ["T-learner", "S-learner", "X-learner"],
+    "Mean CATE (£k)": [tau_t.mean(), tau_s.mean(), tau_x.mean()],
+    "Std CATE (£k)":  [tau_t.std(),  tau_s.std(),  tau_x.std()],
+    "Corr w/ truth":  [np.corrcoef(tau_t, tau_i)[0,1],
+                       np.corrcoef(tau_s, tau_i)[0,1],
+                       np.corrcoef(tau_x, tau_i)[0,1]],
+}).round(3)
+print(summary.to_string(index=False))
+```
+
+::: {.callout-warning}
+**These numbers are not directly comparable to Section 3 or Section 4.** The meta-learners are estimating the average effect of being above-median ad spend versus below-median — a different quantity than "effect per £1k spent." The *ranking* of customers across the three meta-learners and the linear-DML/forest estimators is comparable (and useful — see Section 6), but the level numbers are on a different scale.
+
+X-learner needs a `propensity_model` that supports `predict_proba`, hence the `RandomForestClassifier` rather than the regressor used elsewhere. This is a common gotcha in `econml`.
+:::
+
+---
+
+## 6 · Evaluating CATE Models — GATES and Qini
+
+We cannot compute $\hat{\tau}(x) - \tau(x)$ on real data because $\tau(x)$ is never observed. So we evaluate **rankings** instead. Two related tools: GATES (Sorted Group ATEs) and the Qini curve.
+
+### 6a · GATES — does the ranking work?
+
+```{python}
+#| label: gates
+df_eval = pd.DataFrame({
+    "tau_true":   tau_i,
+    "tau_lindml": tau_lindml,
+    "tau_cf":     tau_cf,
+    "tau_t":      tau_t,
+})
+df_eval["decile_cf"] = pd.qcut(df_eval["tau_cf"], q=10,
+                                labels=[f"D{i}" for i in range(1, 11)])
+
+gates_true_byCF   = df_eval.groupby("decile_cf", observed=True)["tau_true"].mean()
+gates_cf_byCF     = df_eval.groupby("decile_cf", observed=True)["tau_cf"].mean()
+
+fig, ax = plt.subplots(figsize=(9, 4))
+x = np.arange(10); w = 0.4
+ax.bar(x - w/2, gates_true_byCF.values, w, color=COL_TRUE, alpha=0.85,
+       edgecolor="white", label="True CATE in decile")
+ax.bar(x + w/2, gates_cf_byCF.values, w, color=COL_CF, alpha=0.85,
+       edgecolor="white", label="Estimated CATE in decile")
+ax.axhline(tau_true, color=COL_NEUTRAL, linestyle="--", lw=1.5,
+           label=f"ATE = £{tau_true:.2f}k")
+ax.set_xticks(x); ax.set_xticklabels(gates_true_byCF.index)
+ax.set_xlabel("Decile of estimated CATE  (D1 = lowest, D10 = highest)")
+ax.set_ylabel("Mean treatment effect (£k)")
+ax.set_title("GATES — does the model rank customers correctly?", fontweight="bold")
+ax.legend(fontsize=10)
+plt.tight_layout()
+plt.show()
+
+rho, pval = spearmanr(gates_true_byCF.values, gates_cf_byCF.values)
+print(f"Spearman rank correlation between estimated and true GATES: ρ = {rho:.3f}, p = {pval:.4f}")
+print(f"D10 / D1 ratio (true): {gates_true_byCF.iloc[-1] / gates_true_byCF.iloc[0]:.2f}")
+```
+
+::: {.callout-note}
+**Reading the GATES chart.** Customers are sorted into deciles by the model's $\hat{\tau}$. Within each decile we compute the mean *true* effect (green) and the mean *estimated* effect (blue). A model that ranks customers correctly will show a clear monotone climb across deciles in both colours.
+
+The ranking here is **perfect** — Spearman ρ = 1.000. Every model decile maps to the corresponding rank in the truth. The top-decile true effect (£2.33k) is twice the bottom-decile true effect (£1.18k). Real, useful heterogeneity, recovered.
+
+In the field, where you don't have $\tau_i$, the green bars come from estimating an ATE within each decile using DML or IPW — the same machinery from Week 12, applied locally. The shape of those bars *is* the model evaluation.
+:::
+
+### 6b · Qini curve and AUUC
+
+```{python}
+#| label: qini
+def compute_qini(tau_estimated, tau_true_arr, n_points=100):
+    """Cumulative true effect when targeting in order of estimated effect."""
+    order = np.argsort(-tau_estimated)
+    tau_ordered = tau_true_arr[order]
+    fractions = np.linspace(0, 1, n_points)
+    cumulative = np.array([
+        tau_ordered[:max(int(np.ceil(f * len(tau_ordered))), 1)].mean() * f
+        if f > 0 else 0.0
+        for f in fractions
+    ])
+    random_line = np.linspace(0, tau_true_arr.mean(), n_points)
+    auuc = trapezoid(cumulative, fractions) - trapezoid(random_line, fractions)
+    return fractions, cumulative, random_line, auuc
+
+frac_lin,    qini_lin,    random_line, auuc_lin    = compute_qini(tau_lindml, tau_i)
+frac_cf,     qini_cf,     _,           auuc_cf     = compute_qini(tau_cf,     tau_i)
+frac_t,      qini_t,      _,           auuc_t      = compute_qini(tau_t,      tau_i)
+frac_oracle, qini_oracle, _,           auuc_oracle = compute_qini(tau_i,       tau_i)
+
+fig, ax = plt.subplots(figsize=(9, 5))
+ax.plot(frac_oracle, qini_oracle, lw=2,   linestyle="--", color="#15803d",
+        label=f"Oracle  (AUUC = {auuc_oracle:.3f})")
+ax.plot(frac_lin,    qini_lin,    lw=2.5, color=COL_LINDML,
+        label=f"Linear DML  (AUUC = {auuc_lin:.3f})")
+ax.plot(frac_cf,     qini_cf,     lw=2.5, color=COL_CF,
+        label=f"Causal Forest  (AUUC = {auuc_cf:.3f})")
+ax.plot(frac_t,      qini_t,      lw=2,   color=COL_NAIVE, linestyle=":",
+        label=f"T-learner (binarised T)  (AUUC = {auuc_t:.3f})")
+ax.plot(frac_cf,     random_line, lw=1.5, color=COL_NEUTRAL,
+        label="Random targeting (baseline)")
+ax.set_xlabel("Proportion of customers targeted (sorted by estimated CATE, high → low)")
+ax.set_ylabel("Cumulative incremental sales per customer (£k)")
+ax.set_title("Qini curves — value of personalised targeting",
+             fontweight="bold", fontsize=12)
+ax.legend(fontsize=10)
+plt.tight_layout()
+plt.show()
+
+print(f"AUUC summary:")
+print(f"  Random targeting:  0.000 (baseline)")
+print(f"  T-learner (binary) {auuc_t:.4f}")
+print(f"  Causal Forest:     {auuc_cf:.4f}  ({auuc_cf/auuc_oracle:.0%} of oracle)")
+print(f"  Linear DML:        {auuc_lin:.4f}  ({auuc_lin/auuc_oracle:.0%} of oracle)")
+print(f"  Oracle (max):      {auuc_oracle:.4f}")
+```
+
+::: {.callout-note}
+**What the Qini curve shows.** Each curve traces the cumulative true treatment effect as we target customers in order of estimated $\hat{\tau}$, high to low. The further the curve rises above the random-targeting baseline, the more value the ranking provides.
+
+**Linear DML edges Causal Forest** on this dataset — 97% vs 96% of oracle AUUC. Two reasons:
+
+1. The truth is literally linear in `customer_tenure`. Linear DML has the right model class; the forest pays a small flexibility tax.
+2. Linear DML produces a smooth function of tenure; the forest is locally piecewise-constant and slightly overshrinks at the extremes (visible in Section 4).
+
+**The general lesson is not "linear DML is better."** It is: when you have a structural prior on the form of heterogeneity, exploit it. When you don't, causal forest is the safer default — it would still capture this structure, just less efficiently.
+
+The T-learner on binarised treatment captures only about 40% of oracle AUUC. Most of that gap is the binarisation, not the method — coarsening the treatment throws away most of the variation we need.
+:::
+
+---
+
+## 7 · From Estimates to Decisions
+
+A CATE function is not a decision. The translation depends on the per-customer cost of treatment and the firm's risk appetite.
+
+### 7a · The targeting rule
+
+For a treatment with per-customer cost $c$, the optimal binary policy is
+
+$$\pi(x) = \mathbf{1}\big[\hat{\tau}(x) > c\big]$$
+
+Treat customer $x$ if and only if the estimated effect exceeds the cost. Customers with $\hat{\tau}(x) < 0$ should be **kept on the status quo** — treatment hurts them — and the rule does that for free.
+
+```{python}
+#| label: targeting
+cost = 2.0  # £2k cost per customer (illustrative; e.g. fully-loaded discount + admin)
+
+target_cf = tau_cf > cost
+print(f"Cost threshold: £{cost:.2f}k")
+print(f"Customers targeted: {target_cf.sum():,} of {n}  ({target_cf.mean():.1%})")
+print(f"\nAmong targeted:")
+print(f"  Mean estimated CATE:  £{tau_cf[target_cf].mean():.3f}k")
+print(f"  Mean true CATE:       £{tau_i[target_cf].mean():.3f}k")
+print(f"\nAmong not targeted:")
+print(f"  Mean true CATE:       £{tau_i[~target_cf].mean():.3f}k")
+```
+
+```{python}
+#| label: policy-comparison
+treat_all_net   = tau_true - cost
+personalised    = (tau_i[target_cf] - cost).sum() / n  # per-customer
+
+print(f"\nPolicy values (per customer, using true effects for verification):")
+print(f"  Treat nobody:       £{0.0:+.3f}k baseline")
+print(f"  Treat everyone:     £{treat_all_net:+.3f}k net")
+print(f"  Personalised:       £{personalised:+.3f}k net")
+```
+
+::: {.callout-important}
+**The headline business finding.**
+
+At a per-customer cost of **£2.0k**, treating every customer is **loss-making** — the average lift (£1.82k) does not cover the cost. Treat-all loses £0.18k per customer.
+
+Personalised targeting — sending the campaign only to the **37.2%** of customers whose estimated effect exceeds the cost — converts a losing campaign into a small profit (+£0.09k per customer). The targeted subgroup has a true average effect of **£2.24k**, comfortably above cost.
+
+This is the cleanest possible business case for CATE: **the same intervention, the same data, different target list — and the campaign goes from money-losing to profitable.** What CATE buys you is the ability to **identify and prioritise the customer segments where the treatment is most effective**, and stop spending money on the rest.
+:::
+
+::: {.callout-warning}
+**Common trap — targeting on outcome, not effect.**
+
+A naïve heuristic is "send the campaign to customers most likely to buy." This is wrong: customers with **high baseline outcomes are not necessarily those most affected by the treatment**. Loyal customers buy regardless; their marginal lift from a £2k incentive may be smaller than the lift for new customers.
+
+The targeting rule above uses $\hat{\tau}(x)$, not $\hat{Y}(x)$. The two questions ("who will buy?" vs "who will be moved?") have different answers, and only the second one justifies a treatment cost.
+:::
+
+### 7b · Policy tree — from 600 scores to 3 rules
+
+A causal forest gives 600 individual scores. A marketing operations team cannot deploy 600 individual rules in their CRM. A depth-2 policy tree gives them three.
+
+```{python}
+#| label: policy-tree
+# PolicyTree expects rewards per action: [reward_if_no_treat, reward_if_treat]
+rewards = np.column_stack([np.zeros(n), tau_cf - cost])
+
+policy = PolicyTree(max_depth=2, min_samples_leaf=50, random_state=42)
+policy.fit(X, rewards)
+
+policy_treat = policy.predict(X)
+print(f"Policy tree: targets {policy_treat.mean():.1%} of customers")
+print(f"Agreement with the direct-rule policy: "
+      f"{(policy_treat == target_cf.astype(int)).mean():.1%}")
+
+print("\nPolicy tree feature importances:")
+for name, imp in sorted(zip(X_cols, policy.feature_importances_), key=lambda x: -x[1]):
+    if imp > 0:
+        print(f"  {name:24s}  {imp:.4f}")
+```
+
+```{python}
+#| label: policy-tree-plot
+#| fig-height: 4
+#| fig-width: 11
+fig, ax = plt.subplots(figsize=(11, 4))
+policy.plot(ax=ax, feature_names=X_cols, fontsize=10)
+ax.set_title("Policy tree — depth 2",
+             fontweight="bold", fontsize=12)
+plt.tight_layout()
+plt.show()
+```
+
+::: {.callout-note}
+**Reading the tree.** The root split is on `customer_tenure`: customers below the threshold get the treatment, those above do not. The depth-2 children split on other features, but those subsplits do **not change the action**: both leaves under the "low tenure" side recommend treatment (T[1]), both under "high tenure" recommend no treatment (T[0]). This is why feature importance is 1.0 on `customer_tenure` alone — only that variable affects the decision. Pedagogically: a tree's *visualisation* may show splits that don't matter for the policy, while its *importance* metric reports only splits that change the action. Read both.
+
+Agreement with the direct $\hat{\tau}(x) > c$ rule is **92.2%** — the tree throws away about 8% of the per-individual precision in exchange for a deployable rule. That trade is almost always worth making for marketing operations: the tree is auditable, can be implemented in any CRM without a model serving layer, and gives the team something they can argue with.
+
+**Why the tree's `y` argument is the reward matrix, not just $\hat{\tau} - c$**: `PolicyTree` is a welfare-maximisation tree. It needs to know the value of *every* action (treat = $\hat{\tau} - c$, don't treat = 0) so it can choose the action that maximises welfare in each leaf. The output `policy.predict(X)` is the action index per customer.
+:::
+
+---
+
+## 8 · Final Comparison
+
+```{python}
+#| label: final-table
+final = pd.DataFrame({
+    "Method":      ["Linear DML for CATE", "Causal Forest DML",
+                    "T-learner (binarised T)", "Oracle"],
+    "Mean (£k)":   [tau_lindml.mean(), tau_cf.mean(), tau_t.mean(), tau_i.mean()],
+    "Range (£k)":  [f"{tau_lindml.min():.2f}–{tau_lindml.max():.2f}",
+                    f"{tau_cf.min():.2f}–{tau_cf.max():.2f}",
+                    f"{tau_t.min():.2f}–{tau_t.max():.2f}",
+                    f"{tau_i.min():.2f}–{tau_i.max():.2f}"],
+    "AUUC":        [auuc_lin, auuc_cf, auuc_t, auuc_oracle],
+    "CIs?":        ["Yes (per coef + per x)", "Yes (per x)", "No", "—"],
+}).round(3)
+print(final.to_string(index=False))
+```
+
+---
+
+## Week 15 Checklist
+
+Before the exam, make sure you can:
+
+- [ ] State the CATE definition: $\tau(x) = \mathbb{E}[Y(1) - Y(0) \mid X = x]$ — the average treatment effect within the **subpopulation defined by** $X = x$.
+- [ ] State the bridge to ATE: $\text{ATE} = \mathbb{E}_X[\tau(X)]$ — the population average of the CATE function.
+- [ ] Explain why CATE estimates are noisier than ATE: each $\hat{\tau}(x)$ relies on a **smaller, local subsample**; sparse regions of the covariate space lack per-point overlap.
+- [ ] Describe how Linear DML estimates CATE: same residualised regression as Week 12, with **treatment-by-covariate interaction terms** added to the final stage.
+- [ ] Distinguish S-, T-, and X-learner — and know that they require discrete treatment in `econml`.
+- [ ] Explain what makes Causal Forest DML different: splits maximise heterogeneity, honest estimation in leaves, valid pointwise CIs.
+- [ ] Explain why standard ML metrics (RMSE, $R^2$) are unavailable for CATE — and what GATES and the Qini curve do instead.
+- [ ] State the targeting rule: $\pi(x) = \mathbf{1}[\hat{\tau}(x) > c]$. Customers with negative CATE should be kept on the status quo.
+- [ ] Avoid the trap of targeting on predicted outcome rather than predicted effect.
+- [ ] Read a policy tree and explain the trade-off between per-individual precision and operational deployability.
+
+---
+
+*Next week: Block 2 exam. Bring the spine handout. The four weeks come together as one argument: FWL named it, DML operationalised it, CATE personalised it, policy trees deployed it.*
